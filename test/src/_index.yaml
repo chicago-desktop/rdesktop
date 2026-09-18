@@ -52,7 +52,7 @@ entries:
       suite: chicago_rdesktop
     source: file://loopback_test.lua
     method: run
-    modules: [channel, time, process, fs]
+    modules: [channel, time, process, fs, tty]
     imports:
       test: wippy.test:test
       loopback: chicago.rdesktop:loopback
@@ -216,6 +216,15 @@ entries:
     source: file://painter.lua
     method: main
     modules: [tty, gfx, process, channel]
+
+  # app:cellprobe — reports the graphics its terminal claims (loopback_test).
+  - name: cellprobe
+    kind: process.lua
+    meta:
+      comment: A producer that reports gfx.supported and gfx.cell_size before and after tty.start.
+    source: file://cellprobe.lua
+    method: main
+    modules: [tty, gfx, process]
 
   # app:stubborn — a producer that does not act on CANCEL (mesh_test).
   - name: stubborn

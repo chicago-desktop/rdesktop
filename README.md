@@ -149,21 +149,13 @@ the grid it is drawn on. In cells a column is a cell.
 - A viewer in cells sends no `g`: its desktop stays in cells and no picture
   is sent.
 
-**Not yet end to end — a runtime gap.** A producer in a viewport reads the
-graphics probe of its PROCESS, not of the viewport. `view:terminal` fills
-the viewport's probe, but `gfx.supported()` and `gfx.cell_size()` in the
-served desktop answer from the process's own terminal: a protocol guessed
-from the server's environment, and no cell size. The served shell therefore
-says "pixels off: the terminal did not report a cell size" and stays in
-cells.
-- Measured with `view:terminal("sixel", 8.0, 20.0)`: the producer heard
-  "kitty" (from `WEZTERM_PANE`), both before and after `tty.start()`.
-- Until the runtime answers from the viewport's probe, the served desktop
-  sends rows only. The wire, the cache and the drawing are proven with a
-  producer that places its own picture (`app:painter`,
-  test/shots/pictures.png).
-- `view:terminal` takes its sizes as floats: the binding turns an integer
-  argument away ("cell_width must be a non-negative integer").
+**End to end** (runtime 91dcbee8, which answers a viewport producer's
+graphics probe from the viewport). The served Chicago desktop comes up in
+pixels, and its chrome arrives as pictures: the taskbar (`bars`), the desktop
+icons, the Start menu (`menu:<n>`). A cold desktop is ~5.6 KB of pixels, and
+opening the Start menu adds ~11 KB once. `test/shots/session.png` is that
+remote desktop, drawn by the shell's renderer in the session window.
+`view:terminal` takes integer sizes.
 
 **The mouse and pastes** (chicago/shell 0.4.3). A pointer standing on the
 view reaches the window with the column and row of the remote screen. The

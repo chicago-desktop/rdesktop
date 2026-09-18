@@ -94,18 +94,6 @@ local function stop(desktop: string, exit: any, log: any)
     end
 end
 
--- describe(view, protocol, cell_w, cell_h) and images_of(snapshot) take
--- `any`: the runtime's tty type declarations do not list terminal() nor a
--- snapshot's images yet, though the binding has both.
-local function describe(view: any, protocol: string, cell_w: number, cell_h: number): (any, any)
-    local told, why = view:terminal(protocol, cell_w, cell_h)
-    return told, why
-end
-
-local function images_of(snapshot: any): any
-    return snapshot.images
-end
-
 -- pictures(state, images) -> the frame's `p`: every picture on the screen,
 -- the PNG only for a (serial, version) this viewer has not been sent.
 --
@@ -165,11 +153,8 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
     local drawn: any = type(graphics) == "table" and (math.tointeger(graphics.cell_w) or 0) > 0
         and (math.tointeger(graphics.cell_h) or 0) > 0 and graphics or nil
     if drawn then
-        -- Floats on purpose: the binding reads the sizes as lua.LNumber and
-        -- turns an integer argument away as "must be a non-negative
-        -- integer" (runtime tty/viewport.go, integerArg).
-        local told, why = describe(view, host_session.PROTOCOL, (math.tointeger(drawn.cell_w) or 0) + 0.0,
-            (math.tointeger(drawn.cell_h) or 0) + 0.0)
+        local told, why = view:terminal(host_session.PROTOCOL, math.tointeger(drawn.cell_w) or 0,
+            math.tointeger(drawn.cell_h) or 0)
         if not told then
             log:warn("desktop not told it has graphics; it stays in cells", {error = tostring(why)})
             drawn = nil
@@ -199,7 +184,7 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
         if snapshot == nil then return end
         local delta: any, last: any = frames.delta(base_of(state, state.acked), snapshot)
         local message: any = wire.frame(number, delta)
-        if drawn then message.p = pictures(state, images_of(snapshot), log) end
+        if drawn then message.p = pictures(state, snapshot.images, log) end
         local sent, why = wire.send(viewer, message)
         if not sent then
             log:error("frame not sent", {viewer = viewer, session = number, error = tostring(why)})

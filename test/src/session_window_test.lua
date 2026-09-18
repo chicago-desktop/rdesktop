@@ -25,11 +25,19 @@ local function font(file: string): any
     return assert(gfx.font(assert(files:readfile(file)), {size = 13, smooth = true}))
 end
 
-local function screen_has(model: any, pattern: string): boolean
-    for _, row in ipairs(model.screen.rows) do
-        if string.find(row, pattern, 1, true) then return true end
+-- A served desktop in pixels draws its chrome as pictures: the taskbar is
+-- `bars`, an open menu `menu:<n>` (the shell's pixel theme's placement ids).
+local function picture(model: any, prefix: string): any
+    for _, image in ipairs(model.screen.images or {}) do
+        if string.sub(tostring(image.id), 1, #prefix) == prefix then return image end
     end
-    return false
+    return nil
+end
+
+local function pictures_named(model: any): string
+    local names = {}
+    for _, image in ipairs(model.screen.images or {}) do names[#names + 1] = tostring(image.id) end
+    return table.concat(names, ", ")
 end
 
 -- pump(model, ctx, accept, seconds) — what app.run does with the watched
@@ -106,15 +114,22 @@ local function define_tests()
             test.eq(sent[2].x .. "," .. sent[2].y, "4,2", "the column of that screen, not the cell")
         end)
 
-        test.it("opens the remote desktop at that size, drives it, and is drawn: test/shots/session.png", function()
+        test.it("opens the remote desktop in pixels at that size, drives it, and is drawn: test/shots/session.png", function()
             local ctx = app.context({width = CLIENT.w, height = CLIENT.h, native = true, cell_w = CELL.w, cell_h = CELL.h})
             local model = definition.init('{"name":"this one"}', ctx)
             test.eq(tostring(definition.title(model)), "this one - Remote Desktop")
             app.dispatch(definition, model, ctx, {type = "timer", tag = "dial"})
             test.not_nil(model.session, "the session opened")
-            test.is_true(pump(model, ctx, function(m: any) return screen_has(m, "Start") end, 25),
-                "the remote desktop:\n" .. table.concat(model.screen.rows, "\n"))
+            -- The served desktop comes up IN PIXELS: it was told, before it
+            -- started, that it has graphics on our grid, and its chrome
+            -- arrives as pictures — the taskbar among them.
+            test.is_true(pump(model, ctx, function(m: any) return picture(m, "bars") ~= nil end, 25),
+                "the remote taskbar as a picture; pictures: " .. pictures_named(model))
             test.eq(model.screen.width, 72, "the remote side laid itself out on the mono grid")
+            local taskbar: any = picture(model, "bars")
+            test.eq(tostring(taskbar.cols) .. "x" .. tostring(taskbar.rows), "72x2", "the taskbar spans the screen")
+            test.not_nil(taskbar.raster, "its pixels arrived")
+            test.is_true(model.session:picture_bytes() > 0)
 
             -- A click on the remote Start button, mapped by the SDK itself
             -- (ui.terminal_at): the client cell (4, last row) is a column of
@@ -128,15 +143,15 @@ local function define_tests()
                 app.dispatch(definition, model, ctx, {type = "mouse", action = phase, button = "left",
                     x = 4, y = CLIENT.h, column = column, row = row})
             end
-            test.is_true(pump(model, ctx, function(m: any) return screen_has(m, "Programs") end, 10),
-                "a click opened the remote Start menu:\n" .. table.concat(model.screen.rows, "\n"))
+            test.is_true(pump(model, ctx, function(m: any) return picture(m, "menu:") ~= nil end, 10),
+                "a click opened the remote Start menu; pictures: " .. pictures_named(model))
             app.dispatch(definition, model, ctx, {type = "key", key = "esc", key_type = "esc"})
-            test.is_true(pump(model, ctx, function(m: any) return not screen_has(m, "Programs") end, 10), "Esc closed it")
+            test.is_true(pump(model, ctx, function(m: any) return picture(m, "menu:") == nil end, 10), "Esc closed it")
 
             -- A key through update: Alt+Home is the remote Start menu.
             app.dispatch(definition, model, ctx, {type = "key", key = "home", key_type = "home", alt = true})
-            test.is_true(pump(model, ctx, function(m: any) return screen_has(m, "Programs") end, 10),
-                "the remote Start menu:\n" .. table.concat(model.screen.rows, "\n"))
+            test.is_true(pump(model, ctx, function(m: any) return picture(m, "menu:") ~= nil end, 10),
+                "the remote Start menu; pictures: " .. pictures_named(model))
 
             local tree = definition.view(model, ctx)
             test.is_nil(ui.problem(tree))
@@ -150,8 +165,11 @@ local function define_tests()
             -- A resize goes to the remote side in mono columns too.
             ctx.width = 48
             app.dispatch(definition, model, ctx, {type = "resize", width = 48, height = CLIENT.h})
-            test.is_true(pump(model, ctx, function(m: any) return m.screen.width == 60 end, 10),
-                "48 cells of 10 px are 60 mono columns; the screen is " .. tostring(model.screen.width))
+            test.is_true(pump(model, ctx, function(m: any)
+                local bar: any = picture(m, "bars")
+                return m.screen.width == 60 and bar ~= nil and bar.cols == 60
+            end, 10), "48 cells of 10 px are 60 mono columns, and the remote taskbar was laid out anew; the screen is "
+                .. tostring(model.screen.width))
             definition.dispose(model, ctx)
         end)
     end)
