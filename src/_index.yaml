@@ -27,11 +27,11 @@ entries:
       description: A window that shows another Chicago desktop and drives it — on a node of the cluster through its broker (mesh), or on this node in a local viewport (loopback).
 
   # ─── Dependencies ────────────────────────────────────────────────────
-  - version: ">=0.4.4"
+  - version: ">=0.4.6"
     name: dep.chicago.shell
     kind: ns.dependency
     meta:
-      comment: The Chicago shell — the desktop a session serves, its security policies, and the SDK's terminal view with its pointer, paste and drawn frame glyphs (0.4.4).
+      comment: The Chicago shell — the desktop a session serves, its security policies, and the SDK's terminal view with its pointer, paste, frame glyphs and pictures (0.4.6).
     component: github.com/chicago-desktop/shell
 
   - version: ">=0.2.0"
@@ -112,7 +112,7 @@ entries:
     meta:
       comment: "The mesh transport of a remote-desktop session — the desktop on a node of the cluster, served by that node's broker."
     source: file://mesh.lua
-    modules: [process, channel, time, system]
+    modules: [process, channel, time, system, gfx, base64]
     imports:
       wire: chicago.rdesktop:wire
       exits: chicago.rdesktop:exits
@@ -160,7 +160,7 @@ entries:
       comment: "One served desktop session — a local viewport, the desktop in it, one frame in flight to the viewer; ends with the viewer, its node or the desktop."
     source: file://host_session.lua
     method: main
-    modules: [tty, process, channel, time, system, logger]
+    modules: [tty, process, channel, time, system, logger, base64]
     imports:
       frames: chicago.rdesktop:frames
       wire: chicago.rdesktop:wire

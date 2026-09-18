@@ -12,6 +12,9 @@ local ui = require("ui")
 local render = require("render")
 local rasters = require("rasters")
 local session = require("session")
+local mesh = require("mesh")
+local frames = require("frames")
+local process = require("process")
 
 local definition = session.definition
 local CLIENT = {w = 58, h = 20}
@@ -55,6 +58,38 @@ local function define_tests()
             test.eq(columns .. "x" .. rows, "58x20")
             test.is_nil(session.graphics(cells))
             test.eq(session.graphics(pixels).cell_w, ui.MONO_PX)
+        end)
+
+        test.it("draws the pictures that crossed the wire: test/shots/pictures.png", function()
+            local name = "test.broker.window.pictures"
+            assert(process.spawn("chicago.rdesktop:broker", "app:processes",
+                {name = name, entry = "app:painter", host = "app:processes"}))
+            local deadline = time.after("5s")
+            while process.registry.lookup(name) == nil do
+                local picked = channel.select({deadline:case_receive(), time.after("50ms"):case_receive()})
+                if picked.channel == deadline then error("the broker did not take " .. name) end
+            end
+            local ctx = app.context({width = 20, height = 5, native = true, cell_w = 10, cell_h = 20})
+            local columns, rows = session.geometry(ctx)
+            local live = assert(mesh.open({broker = name, width = columns, height = rows, graphics = session.graphics(ctx)}))
+            local model: any = {screen = frames.blank(columns, rows), notice = nil}
+            local until_ = time.after("10s")
+            while model.screen.images == nil or #model.screen.images == 0 do
+                local picked = channel.select({until_:case_receive(), live:updates():case_receive()})
+                if picked.channel == until_ then break end
+                local delta = live:snapshot(model.screen.revision)
+                if delta then frames.apply(model.screen, delta) end
+            end
+            test.eq(#(model.screen.images or {}), 1, "the painter's picture arrived")
+            local tree = session.tree(model, ctx)
+            test.eq(#tree.children[1].images, 1, "and is handed to the terminal view")
+            local store = rasters.store()
+            store.begin()
+            local placed = assert(render.placement({id = "pictures", state_revision = 1, content_state = {sdk = 1, revision = 1,
+                ui = tree, interaction = ctx.interaction}}, {x = 1, y = 1, cols = ctx.width, rows = ctx.height},
+                CELL, {face = font("LiberationSans-Regular.ttf"), mono = font("LiberationMono-Regular.ttf")}, store))
+            assert(assert(fs.get("app:shots")):writefile("pictures.png", assert(placed.raster:encode("png"))))
+            live:close()
         end)
 
         test.it("forwards pastes, and a pointer only with the view's own column and row", function()

@@ -146,7 +146,7 @@ entries:
       suite: chicago_rdesktop
     source: file://session_window_test.lua
     method: run
-    modules: [channel, time, fs, gfx, tty]
+    modules: [channel, time, fs, gfx, tty, process]
     imports:
       test: wippy.test:test
       app: chicago.shell.sdk:app
@@ -154,6 +154,8 @@ entries:
       render: chicago.shell.sdk:render
       rasters: chicago.shell.theme:rasters
       session: chicago.rdesktop:session
+      mesh: chicago.rdesktop:mesh
+      frames: chicago.rdesktop:frames
 
   - name: wire_test
     kind: function.lua
@@ -206,6 +208,15 @@ entries:
     method: main
     modules: [process]
 
+  # app:painter — a producer with a picture on its screen (mesh_test).
+  - name: painter
+    kind: process.lua
+    meta:
+      comment: A tty producer that puts a picture on its screen and moves or replaces it on keys.
+    source: file://painter.lua
+    method: main
+    modules: [tty, gfx, process, channel]
+
   # app:stubborn — a producer that does not act on CANCEL (mesh_test).
   - name: stubborn
     kind: process.lua
@@ -257,10 +268,27 @@ entries:
       comment: In-memory database — the sample does not use it, but the shell's migrations ask for the resource.
     file: ":memory:"
 
+  # The environment: fixed values first, then the file. CHICAGO_PIXELS is
+  # what the application sets too: a served desktop told it has graphics
+  # (view:terminal) comes up in pixels only when it is also asked to. A
+  # desktop on a port without graphics stays in cells regardless.
   - name: env_storage
-    kind: env.storage.file
+    kind: env.storage.router
     meta:
       type: envstorage
+    storages:
+      - app:env_fixed
+      - app:env_file
+
+  - name: env_fixed
+    kind: env.storage.static
+    meta:
+      comment: The values the application sets for the shell.
+    values:
+      CHICAGO_PIXELS: "1"
+
+  - name: env_file
+    kind: env.storage.file
     file_path: ./.wippy/test.env
     auto_create: true
 

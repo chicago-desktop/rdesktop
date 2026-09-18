@@ -34,6 +34,8 @@ local time = require("time")
 local system = require("system")
 local wire = require("wire")
 local exits = require("exits")
+local gfx = require("gfx")
+local base64 = require("base64")
 
 local mesh = {}
 
@@ -120,6 +122,33 @@ local function run()
     end
 end
 
+-- images(entry, list) -> the pictures of a frame, rasters attached
+--
+-- A picture's pixels arrive once per (serial, version) and are kept for the
+-- session; later frames name it by that pair. A picture whose pixels this
+-- side does not have (they did not decode) is left out, not drawn empty.
+local function images(entry: any, list: any): any
+    local out: any = {}
+    for _, item in ipairs(type(list) == "table" and list or {}) do
+        local picture: any = item
+        local key = wire.picture_key(picture.s, picture.v)
+        if type(picture.b) == "string" then
+            entry.picture_bytes = entry.picture_bytes + #picture.b
+            if entry.rasters[key] == nil then
+                local bytes = base64.decode(picture.b)
+                local raster = bytes and gfx.image(bytes) or nil
+                if raster then entry.rasters[key] = raster end
+            end
+        end
+        local raster: any = entry.rasters[key]
+        if raster then
+            out[#out + 1] = {id = tostring(picture.i), x = picture.x, y = picture.y, cols = picture.c,
+                rows = picture.r, z = picture.z, serial = picture.s, version = picture.v, raster = raster}
+        end
+    end
+    return out
+end
+
 -- take(entry) -> the frame held for the window | nil; it is no longer held.
 local function take(entry: any): any
     if entry.over then return nil end
@@ -179,6 +208,7 @@ function mesh.open(spec: any): (any, string?)
 
     viewer.next = viewer.next + 1
     local entry: any = {number = viewer.next, node = node, server = nil, pending = nil, received = 0, life = now_ms(),
+        rasters = {}, picture_bytes = 0,
         handed = nil, over = false, opening = channel.new(1),
         updates = channel.new(1), ended = channel.new(1)}
     viewer.sessions[entry.number] = entry
@@ -246,6 +276,7 @@ function mesh.open(spec: any): (any, string?)
             tell({k = "ack"})
             return nil
         end
+        if data.p ~= nil then delta.images = images(entry, data.p) end
         entry.handed = delta.revision
         tell({k = "ack", r = delta.revision})
         return delta
@@ -279,9 +310,14 @@ function mesh.open(spec: any): (any, string?)
         return entry.ended
     end
 
-    -- For tests: frames received so far (one in flight, never a queue).
+    -- For tests: frames received so far (one in flight, never a queue), and
+    -- the picture bytes they carried (each picture's pixels once).
     function session:received(): integer
         return math.tointeger(entry.received) or 0
+    end
+
+    function session:picture_bytes(): integer
+        return math.tointeger(entry.picture_bytes) or 0
     end
 
     return session, nil

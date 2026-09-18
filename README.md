@@ -132,14 +132,38 @@ cells of 10 px hold 72 columns. The window opens the remote side at that
 size and resizes it to that size, so the remote desktop lays itself out on
 the grid it is drawn on. In cells a column is a cell.
 
-**Rows and a cursor only.** A viewport snapshot carries rows, a cursor and a
-revision. Rasters (`placements`) do not travel over the wire yet. So the
-remote desktop stays a cells desktop — its chrome drawn as characters,
-which the view draws in the mono face. The viewer's grid goes to the
-serving side in `open` (`g`, wire.lua), and nothing acts on it yet. Telling
-the remote desktop it has graphics (`view:terminal`) before rasters travel
-would make it draw its chrome as pictures nobody receives: a desktop
-without frames. The order is: rasters over the wire first, then the probe.
+**Pictures** (runtime d20096ed, chicago/shell 0.4.6).
+- The viewer sends its grid in `open` (`g`: a mono column wide, a row high).
+- The serving session tells its desktop, BEFORE the desktop starts, that it
+  has graphics on exactly that grid (`view:terminal`). The desktop then lays
+  its pixel chrome out for our pixels, and nothing is scaled.
+- Every frame carries the pictures standing on the remote screen (`p`), and
+  the terminal view draws them over the rows.
+- A picture's pixels (PNG, base64) travel once per `(serial, version)` per
+  session: the identity the picture keeps across the viewport. Later frames
+  name it by that pair, with its geometry alone. **The cache is a condition
+  of working, not an optimisation**: a wallpaper re-sent with every
+  keystroke would fill the unbounded queue between the nodes.
+- A new `open` starts with an empty cache on both sides, so a reopened window
+  is sent everything again.
+- A viewer in cells sends no `g`: its desktop stays in cells and no picture
+  is sent.
+
+**Not yet end to end — a runtime gap.** A producer in a viewport reads the
+graphics probe of its PROCESS, not of the viewport. `view:terminal` fills
+the viewport's probe, but `gfx.supported()` and `gfx.cell_size()` in the
+served desktop answer from the process's own terminal: a protocol guessed
+from the server's environment, and no cell size. The served shell therefore
+says "pixels off: the terminal did not report a cell size" and stays in
+cells.
+- Measured with `view:terminal("sixel", 8.0, 20.0)`: the producer heard
+  "kitty" (from `WEZTERM_PANE`), both before and after `tty.start()`.
+- Until the runtime answers from the viewport's probe, the served desktop
+  sends rows only. The wire, the cache and the drawing are proven with a
+  producer that places its own picture (`app:painter`,
+  test/shots/pictures.png).
+- `view:terminal` takes its sizes as floats: the binding turns an integer
+  argument away ("cell_width must be a non-negative integer").
 
 **The mouse and pastes** (chicago/shell 0.4.3). A pointer standing on the
 view reaches the window with the column and row of the remote screen. The

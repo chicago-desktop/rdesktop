@@ -19,11 +19,17 @@
 --   m  reason     why a session closed or failed, in words for the status line
 --   g  graphics   on open: the viewer's grid, {cell_w, cell_h} in pixels
 --                 (cell_w is the mono column the remote screen is drawn in);
---                 absent when the viewer draws in cells. Carried, not yet
---                 acted on: the serving side tells its desktop about
---                 graphics (view:terminal) only once rasters travel over
---                 the wire, or the desktop draws its chrome as pictures that
---                 never arrive.
+--                 absent when the viewer draws in cells. With it the serving
+--                 side tells its desktop it has graphics on that grid
+--                 (view:terminal) and sends pictures; without it, neither.
+--   p  pictures   on a frame, when the viewer has graphics: EVERY picture
+--                 standing on the screen, a list of {i = id, x, y, c = cols,
+--                 r = rows, z, s = serial, v = version, b = bytes?}; x and y
+--                 one-based on the remote screen's grid. `b` (the PNG,
+--                 base64) is sent once per (serial, version) per session:
+--                 the pair is the picture's identity, kept as it crossed the
+--                 viewport, and a picture the viewer has is sent as its
+--                 geometry alone. A new `open` is a clean slate.
 --
 -- Who sends what: the viewer sends open, ack, input, resize and close; the
 -- server sends opened, frame, closed and failed.
@@ -180,6 +186,11 @@ function wire.judge(present: boolean?, last_life: integer, now: integer, ceiling
     if present == true then return "here" end
     if now - last_life > ceiling then return "expired" end
     return "unknown"
+end
+
+-- picture_key(serial, version) -> the identity a picture is cached by
+function wire.picture_key(serial: any, version: any): string
+    return tostring(math.tointeger(serial) or 0) .. ":" .. tostring(math.tointeger(version) or 0)
 end
 
 -- present(members, node) -> boolean | nil

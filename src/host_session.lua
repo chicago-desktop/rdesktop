@@ -27,6 +27,7 @@ local channel = require("channel")
 local time = require("time")
 local system = require("system")
 local logger = require("logger")
+local base64 = require("base64")
 local frames = require("frames")
 local wire = require("wire")
 local exits = require("exits")
@@ -35,6 +36,11 @@ local host_session = {}
 
 -- How often the viewer's node is looked for in the cluster's membership.
 host_session.CHECK_EVERY = "2s"
+
+-- The graphics protocol a served desktop is told it has. Its pictures come
+-- back through the viewport, not through a terminal, so any protocol the
+-- desktop draws for will do.
+host_session.PROTOCOL = "kitty"
 
 -- How long a session keeps a viewer nothing confirms — no message from it,
 -- no membership that shows its node — before it ends (milliseconds).
@@ -88,11 +94,55 @@ local function stop(desktop: string, exit: any, log: any)
     end
 end
 
+-- describe(view, protocol, cell_w, cell_h) and images_of(snapshot) take
+-- `any`: the runtime's tty type declarations do not list terminal() nor a
+-- snapshot's images yet, though the binding has both.
+local function describe(view: any, protocol: string, cell_w: number, cell_h: number): (any, any)
+    local told, why = view:terminal(protocol, cell_w, cell_h)
+    return told, why
+end
+
+local function images_of(snapshot: any): any
+    return snapshot.images
+end
+
+-- pictures(state, images) -> the frame's `p`: every picture on the screen,
+-- the PNG only for a (serial, version) this viewer has not been sent.
+--
+-- The cache is not an optimisation: a desktop's wallpaper re-sent with
+-- every keystroke would fill the unbounded queue between the nodes. It
+-- lives as long as the session; a new `open` is a new session and starts
+-- empty, so a viewer that forgot everything (a reopened window) is sent
+-- everything again.
+local function pictures(state: any, images: any, log: any): any
+    local out: any = {}
+    for _, entry in ipairs(type(images) == "table" and images or {}) do
+        local image: any = entry
+        local key = wire.picture_key(image.serial, image.version)
+        local picture: any = {i = tostring(image.id), x = image.x, y = image.y, c = image.cols, r = image.rows,
+            z = image.z, s = image.serial, v = image.version}
+        if not state.known[key] then
+            local png, err = image.raster:encode("png")
+            if png then
+                picture.b = base64.encode(tostring(png))
+                state.known[key] = true
+                state.sent_bytes = state.sent_bytes + #picture.b
+            else
+                log:warn("picture not encoded", {id = tostring(image.id), error = tostring(err)})
+            end
+        end
+        out[#out + 1] = picture
+    end
+    return out
+end
+
 -- main(viewer, session, width, height, entry, host, graphics?)
 --
--- `graphics` is the viewer's grid from `open` (wire.lua, `g`). It is kept
--- and not acted on: telling the desktop (view:terminal) before rasters
--- travel over the wire makes it draw its chrome as pictures nobody gets.
+-- `graphics` is the viewer's grid from `open` (wire.lua, `g`). With it the
+-- desktop is told, BEFORE it starts, that it has graphics on exactly that
+-- grid (view:terminal) — the grid the viewer draws the remote screen on, not
+-- any terminal's cell — and the frames carry its pictures. Without it the
+-- desktop stays in cells and no picture is sent.
 function host_session.main(viewer: any, session: any, width: any, height: any, entry: any, host: any, graphics: any)
     local log = logger:named("chicago.rdesktop.session")
     local number = math.tointeger(session) or 0
@@ -112,6 +162,19 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
     local view, verr = tty.viewport({width = cols, height = rows})
     if not view then return fail("the remote computer could not make a screen: " .. tostring(verr)) end
     local updates = assert(view:updates())
+    local drawn: any = type(graphics) == "table" and (math.tointeger(graphics.cell_w) or 0) > 0
+        and (math.tointeger(graphics.cell_h) or 0) > 0 and graphics or nil
+    if drawn then
+        -- Floats on purpose: the binding reads the sizes as lua.LNumber and
+        -- turns an integer argument away as "must be a non-negative
+        -- integer" (runtime tty/viewport.go, integerArg).
+        local told, why = describe(view, host_session.PROTOCOL, (math.tointeger(drawn.cell_w) or 0) + 0.0,
+            (math.tointeger(drawn.cell_h) or 0) + 0.0)
+        if not told then
+            log:warn("desktop not told it has graphics; it stays in cells", {error = tostring(why)})
+            drawn = nil
+        end
+    end
     local grant = assert(view:grant())
     local desktop, derr = process.with_options({terminal = grant})
         :spawn_linked_monitored(tostring(entry), tostring(host))
@@ -126,7 +189,7 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
 
     -- Mutable state in a table (go-lua and pcall).
     local state: any = {inflight = false, acked = -1, sent_revision = nil, sent_last = nil,
-        reason = nil, tell = true, life = now_ms()}
+        reason = nil, tell = true, life = now_ms(), known = {}, sent_bytes = 0}
 
     wire.send(viewer, {k = "opened", s = number, x = cols, y = rows})
 
@@ -135,7 +198,9 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
         local snapshot: any = view:snapshot(math.tointeger(state.acked) or -1)
         if snapshot == nil then return end
         local delta: any, last: any = frames.delta(base_of(state, state.acked), snapshot)
-        local sent, why = wire.send(viewer, wire.frame(number, delta))
+        local message: any = wire.frame(number, delta)
+        if drawn then message.p = pictures(state, images_of(snapshot), log) end
+        local sent, why = wire.send(viewer, message)
         if not sent then
             log:error("frame not sent", {viewer = viewer, session = number, error = tostring(why)})
             return
@@ -203,7 +268,8 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
         end
     end
 
-    log:info("session ends", {viewer = viewer, session = number, reason = state.reason})
+    log:info("session ends", {viewer = viewer, session = number, reason = state.reason,
+        pictures_sent = state.sent_bytes})
     exits.forget(viewer)
     -- The viewer hears first: the desktop's shutdown takes up to the grace.
     if state.tell then wire.send(viewer, {k = "closed", s = number, m = state.reason}) end

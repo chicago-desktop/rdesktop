@@ -67,6 +67,9 @@ function frames.apply(screen: any, delta: any): any
     end
     screen.revision = delta.revision
     screen.cursor = delta.cursor
+    -- Pictures come whole with every frame that carries them (a list of
+    -- what stands on the screen now); a frame without them keeps the last.
+    if delta.images ~= nil then screen.images = delta.images end
     return screen
 end
 

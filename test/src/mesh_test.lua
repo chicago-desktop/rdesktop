@@ -49,16 +49,21 @@ local function open_reporting(broker: string): (any, string)
     return session, tostring(picked.value)
 end
 
--- A broker of its own for the echo producer, under a name of its own.
-local function start_broker(name: string): string
+-- A broker of its own for a test producer, under a name of its own.
+local function start_broker_offering(name: string, entry: string): string
     local pid = assert(process.spawn("chicago.rdesktop:broker", "app:processes",
-        {name = name, entry = ECHO_BROKER.entry, host = ECHO_BROKER.host}))
+        {name = name, entry = entry, host = ECHO_BROKER.host}))
     local deadline = time.after("5s")
     while process.registry.lookup(name) == nil do
         local picked = channel.select({deadline:case_receive(), time.after("50ms"):case_receive()})
         if picked.channel == deadline then error("the broker did not take " .. name) end
     end
     return tostring(pid)
+end
+
+local function start_broker(name: string): string
+    local pid = start_broker_offering(name, ECHO_BROKER.entry)
+    return pid
 end
 
 -- wait(session, screen, accept, seconds) -> delta | nil, seen
@@ -297,6 +302,63 @@ local function define_tests()
                 "The connection to node-b was lost.")
             test.eq(mesh.ended_reason("node-b", {error = "boom"}), "The remote session on node-b failed: boom")
             test.eq(mesh.ended_reason("node-b", {}), "The remote session on node-b ended.")
+        end)
+
+        test.it("sends a picture's pixels once per identity, and its geometry with every frame", function()
+            start_broker_offering("test.broker.pictures", "app:painter")
+            local graphics = {cell_w = 8, cell_h = 20}
+            local session = assert(mesh.open({broker = "test.broker.pictures", width = 20, height = 5, graphics = graphics}))
+            local screen = frames.blank(20, 5)
+            test.not_nil(wait(session, screen, row_is(1, "painter start"), 10))
+            test.eq(#screen.images, 1, "the picture on the screen")
+            local picture: any = screen.images[1]
+            test.eq(table.concat({picture.id, picture.x, picture.y, picture.cols, picture.rows}, ","), "pic,2,2,2,2")
+            test.not_nil(picture.raster, "its pixels arrived")
+            local w, h = picture.raster:size()
+            test.eq(tostring(w) .. "x" .. tostring(h), "16x40")
+            local first = session:picture_bytes()
+            test.is_true(first > 0)
+
+            -- Only the text changes: the picture goes as its geometry alone.
+            session:send(key("x"))
+            test.not_nil(wait(session, screen, row_is(1, "painter x"), 10))
+            test.eq(session:picture_bytes(), first, "no pixels for a picture the viewer has")
+            test.eq(#screen.images, 1)
+
+            -- The same picture moved: the geometry changes, the pixels do not travel.
+            session:send(key("m"))
+            test.not_nil(wait(session, screen, row_is(1, "painter m"), 10))
+            test.eq(session:picture_bytes(), first, "a move sends no pixels")
+            test.eq(screen.images[1].x, 3)
+
+            -- A new picture under the same id: its pixels travel, once, and
+            -- the viewer shows them — the cache is keyed by identity, not id.
+            local before: any = screen.images[1]
+            session:send(key("n"))
+            test.not_nil(wait(session, screen, row_is(1, "painter n"), 10))
+            test.is_true(session:picture_bytes() > first, "a new identity sends its pixels")
+            local after: any = screen.images[1]
+            test.is_false(after.serial == before.serial and after.version == before.version, "a new identity")
+            test.is_true(after.raster ~= before.raster, "the new pixels are shown, not the old ones under the same id")
+            session:close()
+
+            -- A new session starts clean: the pixels travel again.
+            local again = assert(mesh.open({broker = "test.broker.pictures", width = 20, height = 5, graphics = graphics}))
+            local fresh = frames.blank(20, 5)
+            test.not_nil(wait(again, fresh, row_is(1, "painter start"), 10))
+            test.is_true(again:picture_bytes() > 0, "a reopened window is sent everything")
+            test.not_nil(fresh.images[1].raster)
+            again:close()
+        end)
+
+        test.it("sends no pictures to a viewer that draws in cells", function()
+            start_broker_offering("test.broker.cells", "app:painter")
+            local session = assert(mesh.open({broker = "test.broker.cells", width = 20, height = 5}))
+            local screen = frames.blank(20, 5)
+            test.not_nil(wait(session, screen, row_is(1, "painter start"), 10))
+            test.is_nil(screen.images, "no pictures without graphics")
+            test.eq(session:picture_bytes(), 0)
+            session:close()
         end)
 
         test.it("reaches this node's own broker service and its Chicago desktop", function()

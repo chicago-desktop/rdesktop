@@ -84,11 +84,11 @@ function session.geometry(context: any): (integer, integer)
     return columns, rows
 end
 
--- graphics(context) -> what the viewer's screen is, for `open`: the protocol
--- and the grid it draws the remote screen on. Carried and not yet used: the
--- serving side would tell its desktop (view:terminal) only once rasters
--- travel over the wire — telling it earlier makes it draw its chrome as
--- pictures that never arrive (README, "Rows and a cursor only").
+-- graphics(context) -> the grid this window draws the remote screen on, for
+-- `open`: a mono column wide, a row high. The serving side tells its desktop
+-- it has graphics on exactly this grid, so the desktop lays its chrome out
+-- for our pixels and no picture has to be scaled; nil in cells, and then
+-- the desktop stays in cells and sends no pictures.
 function session.graphics(context: any): any
     local cell: any = context.cell
     if type(cell) ~= "table" then return nil end
@@ -103,7 +103,10 @@ function session.tree(model: any, context: any): any
     local shown = model.notice == nil and type(cursor) == "table" and cursor.visible == true
     return {kind = "column", children = {
         {kind = "terminal", rows = frames.compose(model.screen, columns, rows, model.notice),
-            cursor = shown and {x = cursor.x, y = cursor.y, visible = true} or nil},
+            cursor = shown and {x = cursor.x, y = cursor.y, visible = true} or nil,
+            -- The remote desktop's pictures (its chrome, its wallpaper),
+            -- over the rows, on the same grid; the view drops them in cells.
+            images = model.screen.images},
     }}
 end
 
