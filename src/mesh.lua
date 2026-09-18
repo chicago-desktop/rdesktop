@@ -128,6 +128,22 @@ local function take(entry: any): any
     return data
 end
 
+-- ended_reason(node, result) -> the words for the serving session's end
+--
+-- The node is named here: the runtime's own reason for a departed node
+-- ("node disconnected", minted in boot/components/system/topology.go) does
+-- not say which one, and this side knows — it opened the session.
+function mesh.ended_reason(node: string, result: any): string
+    local r: any = type(result) == "table" and result or {}
+    local why = r.error ~= nil and tostring(r.error) or nil
+    if r.link_down or (why and string.find(why, "disconnect", 1, true)) then
+        return "The connection to " .. node .. " was lost."
+    elseif why then
+        return "The remote session on " .. node .. " failed: " .. why
+    end
+    return "The remote session on " .. node .. " ended."
+end
+
 -- The server session's exit, told as the end of the session.
 local function watch_server(entry: any)
     local server = tostring(entry.server)
@@ -135,13 +151,7 @@ local function watch_server(entry: any)
     process.monitor(server)
     coroutine.spawn(function()
         local result: any = exit:receive()
-        if type(result) == "table" and result.link_down then
-            finish(entry, "The connection to " .. tostring(entry.node) .. " was lost.")
-        elseif type(result) == "table" and result.error ~= nil then
-            finish(entry, "The remote session failed: " .. tostring(result.error))
-        else
-            finish(entry, "The remote session ended.")
-        end
+        finish(entry, mesh.ended_reason(tostring(entry.node), result))
     end)
 end
 

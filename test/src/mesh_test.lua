@@ -7,12 +7,47 @@ local channel = require("channel")
 local time = require("time")
 local process = require("process")
 local fs = require("fs")
+local security = require("security")
 local mesh = require("mesh")
 local exits = require("exits")
 local inputs = require("inputs")
 local frames = require("frames")
 
 local ECHO_BROKER = {entry = "app:echo", host = "app:processes"}
+
+-- What the broker service runs under (src/_index.yaml, broker.service): a
+-- broker started with it meets the same permission checks — a cancel the
+-- policy does not allow is refused there, and nowhere in a permissive test.
+local SERVICE_POLICIES = {"chicago.rdesktop:serving", "chicago.shell.security:shell_runtime",
+    "chicago.shell.security:shell_env"}
+
+-- A broker under the service's own actor and policies, serving `entry`.
+local function start_service_like_broker(name: string, entry: string)
+    local scope = security.new_scope()
+    for _, id in ipairs(SERVICE_POLICIES) do
+        local policy: any = assert(security.policy(id))
+        scope = scope:with(policy :: security.Policy)
+    end
+    assert(process.with_context({}):with_actor(security.new_actor("chicago.rdesktop.broker", {})):with_scope(scope)
+        :spawn("chicago.rdesktop:broker", "app:processes", {name = name, entry = entry, host = "app:processes"}))
+    local deadline = time.after("5s")
+    while process.registry.lookup(name) == nil do
+        local picked = channel.select({deadline:case_receive(), time.after("50ms"):case_receive()})
+        if picked.channel == deadline then error("the broker did not take " .. name) end
+    end
+end
+
+-- open_reporting(broker) -> session, desktop pid
+local function open_reporting(broker: string): (any, string)
+    process.registry.register("rdesktop.test.echoes")
+    local started = process.listen("echo.started")
+    local session = assert(mesh.open({broker = broker, width = 20, height = 3}))
+    local picked = channel.select({started:case_receive(), time.after("10s"):case_receive()})
+    process.unlisten(started)
+    process.registry.unregister("rdesktop.test.echoes")
+    assert(picked.channel == started, "the desktop did not report its pid")
+    return session, tostring(picked.value)
+end
 
 -- A broker of its own for the echo producer, under a name of its own.
 local function start_broker(name: string): string
@@ -221,6 +256,47 @@ local function define_tests()
             local desktop = tostring(picked.value)
             process.terminate(tostring(session.server))
             test.is_true(gone(desktop, 10), "no orphaned desktop: it is linked to its session")
+        end)
+
+        test.it("ends the desktop when the window closes normally, under the service's own policy", function()
+            start_service_like_broker("test.broker.close", "app:echo")
+            local session, desktop = open_reporting("test.broker.close")
+            session:close()
+            -- Asked with a cancel it obeys: gone well inside the grace. A
+            -- cancel the policy refuses would leave it to the terminate.
+            test.is_true(gone(desktop, 4), "a desktop that acts on CANCEL goes at once")
+        end)
+
+        test.it("terminates a desktop that ignores the request once the grace is over", function()
+            start_service_like_broker("test.broker.stubborn", "app:stubborn")
+            local session, desktop = open_reporting("test.broker.stubborn")
+            session:close()
+            test.is_true(gone(desktop, 12), "a cancel is a request; the terminate is the guarantee")
+        end)
+
+        test.it("ends the desktop too when the viewer's process vanishes", function()
+            start_service_like_broker("test.broker.vanish", "app:stubborn")
+            process.registry.register("rdesktop.test.echoes")
+            local started = process.listen("echo.started")
+            local replies = process.listen("probe")
+            local probe = assert(process.spawn("app:viewer_probe", "app:processes", tostring(process.pid()), "test.broker.vanish"))
+            local first = channel.select({started:case_receive(), time.after("10s"):case_receive()})
+            channel.select({replies:case_receive(), time.after("10s"):case_receive()})
+            process.unlisten(started)
+            process.unlisten(replies)
+            process.registry.unregister("rdesktop.test.echoes")
+            test.eq(first.channel, started)
+            local desktop = tostring(first.value)
+            process.send(tostring(probe), "die", true)
+            test.is_true(gone(desktop, 15), "no orphaned desktop after the viewer is gone")
+        end)
+
+        test.it("names the computer when its session ends", function()
+            test.eq(mesh.ended_reason("node-b", {error = "node disconnected"}), "The connection to node-b was lost.")
+            test.eq(mesh.ended_reason("node-b", {link_down = true, error = "linked process failed"}),
+                "The connection to node-b was lost.")
+            test.eq(mesh.ended_reason("node-b", {error = "boom"}), "The remote session on node-b failed: boom")
+            test.eq(mesh.ended_reason("node-b", {}), "The remote session on node-b ended.")
         end)
 
         test.it("reaches this node's own broker service and its Chicago desktop", function()

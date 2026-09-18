@@ -83,7 +83,7 @@ entries:
     meta:
       comment: The loopback transport of a remote-desktop session — the remote desktop in a local tty viewport on this node.
     source: file://loopback.lua
-    modules: [tty, process, channel]
+    modules: [tty, process, channel, time]
     imports:
       frames: chicago.rdesktop:frames
       exits: chicago.rdesktop:exits
@@ -183,6 +183,7 @@ entries:
         - process.spawn.linked
         - process.monitor
         - process.host
+        - process.cancel
         - process.terminate
         - process.send
         - system.read
@@ -221,6 +222,7 @@ entries:
         - process.spawn.linked
         - process.monitor
         - process.host
+        - process.cancel
         - process.terminate
       resources: "*"
       effect: allow

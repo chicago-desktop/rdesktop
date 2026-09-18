@@ -219,9 +219,21 @@ reason back to the connection window.
     left", and the serving session died without ending its desktop.
   - Fix: every session process traps links before its first monitor or link
     (`exits.trap`), and `exits` delivers LINK_DOWN as an end, like EXIT.
-- The desktop is **linked** to its serving session (`spawn_linked_monitored`,
-  loopback too). A session that dies any other way takes its desktop with
-  it; no orphaned desktop runs unseen.
+- **`process.cancel` does not kill.** It only delivers `pid.cancel` to the
+  target's events, and its deadline ends nothing. The compositor acts on it
+  like Shut Down, which waits for its windows; a process that does not act
+  on it runs on. So a session ends its desktop in three steps: a cancel,
+  the grace (`CLOSE_GRACE` 5 s, waiting for the exit), then
+  `process.terminate` — the way the runtime's SSH host does it
+  (`service/terminal/ssh.go`, `cancel`). A cancel refused by the policy
+  returns `nil, err`, never an error raised. Once `serving` lacked
+  `process.cancel`, and every served desktop outlived its session silently
+  on the two-node stand. `serving` and `session_spawn` now carry both
+  `process.cancel` and `process.terminate`, and every refusal is logged.
+- The desktop is also **linked** to its serving session
+  (`spawn_linked_monitored`, loopback too). A session that dies abnormally
+  takes its desktop with it. A link does nothing on a normal exit — hence
+  the terminate above.
 - A refused spawn raises rather than returns, so a session can die before
   it answers. The broker watches its sessions and tells the viewer
   `failed` with the error, never a timeout.

@@ -29,7 +29,7 @@ end
 function connect.computers(snapshot: any): (any, string)
     local snap: any = type(snapshot) == "table" and snapshot or {}
     local problems: any = type(snap.problems) == "table" and snap.problems or {}
-    local own = type(snap.node_id) == "string" and snap.node_id or nil
+    local own = type(snap.node_id) == "string" and snap.node_id ~= "" and snap.node_id or nil
     local host = type(snap.hostname) == "string" and snap.hostname ~= "" and snap.hostname or nil
 
     local function caption(id: string, is_local: boolean): string
@@ -49,10 +49,14 @@ function connect.computers(snapshot: any): (any, string)
                 addr = type(member.addr) == "string" and member.addr or "", is_local = is_local}
         end
     end
-    -- This computer is always there to connect to, even when the membership
-    -- could not be read.
-    if not seen_local and own then
-        rows[#rows + 1] = {id = own, name = caption(own, true), addr = "", is_local = true}
+    local listed = #rows
+    -- This computer is always there to connect to — when the membership
+    -- could not be read, when it answered empty (a node that has just lost
+    -- a peer can), even when this node's id is unknown: an empty id dials
+    -- "this node" and the transport finds its id itself.
+    if not seen_local then
+        local name = own and caption(own, true) or host or "This computer"
+        rows[#rows + 1] = {id = own or "", name = name, addr = "", is_local = true}
     end
     table.sort(rows, function(a: any, b: any)
         if a.is_local ~= b.is_local then return a.is_local end
@@ -62,6 +66,8 @@ function connect.computers(snapshot: any): (any, string)
     local status: string
     if problems.members ~= nil then
         status = tostring(problems.members)
+    elseif listed == 0 then
+        status = "The network listed no computers just now; it is read again every few seconds."
     elseif #rows <= 1 and snap.node_role == "non-member" then
         status = "The network is off: this computer is not in a cluster."
     elseif #rows <= 1 then

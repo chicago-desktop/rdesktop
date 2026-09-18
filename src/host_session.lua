@@ -40,8 +40,18 @@ host_session.CHECK_EVERY = "2s"
 -- no membership that shows its node — before it ends (milliseconds).
 host_session.SILENCE_LIMIT = 30000
 
--- How long the desktop gets to shut down when the session ends.
+-- How long the desktop gets to shut down when the session ends; after it,
+-- plus a second of slack for the exit to arrive, it is terminated.
+--
+-- CANCEL IS A REQUEST, NOT A KILL. process.cancel only delivers `pid.cancel`
+-- to the target's events; nothing ends a process that does not act on it,
+-- whatever the deadline says. The compositor does act on it — as Shut Down,
+-- which waits for its windows — so it is asked first, and terminated if it
+-- has not gone when the grace is over: the way the runtime's SSH host ends
+-- a desktop (service/terminal/ssh.go, cancel). A link does not help either:
+-- a session that ends normally does not take its linked desktop along.
 host_session.CLOSE_GRACE = "5s"
+host_session.CLOSE_WAIT = "6s"
 
 -- base_of(state, revision) -> rows of the frame in flight | nil
 --
@@ -60,6 +70,22 @@ end
 -- viewport does not accept is dropped, as a local one would be.
 local function forward(view: any, event: any)
     view:send(event)
+end
+
+-- stop(desktop, exit, log) — ask the desktop to finish, then make sure.
+-- Every refusal is logged: a cancel that is not allowed returns nil, err
+-- and was once dropped here silently, leaving the desktop running.
+local function stop(desktop: string, exit: any, log: any)
+    local asked, why = process.cancel(desktop, host_session.CLOSE_GRACE)
+    if not asked then log:warn("desktop not asked to finish", {desktop = desktop, error = tostring(why)}) end
+    local picked = channel.select({exit:case_receive(), time.after(host_session.CLOSE_WAIT):case_receive()})
+    if picked.channel == exit then return end
+    local ended, err = process.terminate(desktop)
+    if ended then
+        log:warn("desktop terminated after the grace", {desktop = desktop})
+    else
+        log:error("desktop could not be ended", {desktop = desktop, error = tostring(err)})
+    end
 end
 
 -- main(viewer, session, width, height, entry, host)
@@ -174,10 +200,11 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
     end
 
     log:info("session ends", {viewer = viewer, session = number, reason = state.reason})
-    if desktop then process.cancel(desktop, host_session.CLOSE_GRACE) end
     exits.forget(viewer)
-    view:close()
+    -- The viewer hears first: the desktop's shutdown takes up to the grace.
     if state.tell then wire.send(viewer, {k = "closed", s = number, m = state.reason}) end
+    if desktop then stop(desktop, desktop_exit, log) end
+    view:close()
 end
 
 return host_session

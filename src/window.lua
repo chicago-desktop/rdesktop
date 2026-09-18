@@ -50,7 +50,8 @@ local function dial(model: any, context: any, id: any)
     local opened, why = desktop.open({
         entry = SESSION,
         title = name .. " - Remote Desktop",
-        args = tostring(json.encode({computer = id, name = name, keys = model.keys})),
+        -- An empty id is "this node": the session's transport finds its id.
+        args = tostring(json.encode({computer = id ~= "" and id or nil, name = name, keys = model.keys})),
     })
     if not opened then
         model.notice = "The session window did not open: " .. tostring(why)
@@ -62,6 +63,10 @@ end
 local definition: any = {}
 
 definition.title = "Remote Desktop Connection"
+
+-- The network is read again on this beat: a list read while a peer was
+-- leaving must not stay wrong until the person presses F5.
+definition.interval = "5s"
 
 function definition.init(args: any, context: any): any
     local given = options(args)
@@ -82,8 +87,8 @@ function definition.view(model: any, context: any): any
 end
 
 function definition.update(model: any, action: any, context: any): boolean
-    -- F5 reads the network again, as in Explorer.
-    if action.type == "key" and action.key_type == "f5" then
+    -- F5 reads the network again, as in Explorer; so does the beat.
+    if action.type == "tick" or (action.type == "key" and action.key_type == "f5") then
         connect.refresh(model, facts.read(FACTS))
         return true
     end

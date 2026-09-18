@@ -45,6 +45,7 @@
 local tty = require("tty")
 local process = require("process")
 local channel = require("channel")
+local time = require("time")
 local frames = require("frames")
 local exits = require("exits")
 
@@ -53,8 +54,10 @@ local loopback = {}
 loopback.NAME = "loopback"
 
 -- How long the remote desktop gets to shut down on close: it closes its
--- windows as Shut Down does, then its process is terminated.
-loopback.CLOSE_GRACE = "5s"
+-- windows as Shut Down does; if it has not gone by CLOSE_WAIT it is
+-- terminated. A cancel is a request, not a kill (host_session.lua says why).
+loopback.CLOSE_GRACE = "3s"
+loopback.CLOSE_WAIT = "4s"
 
 local function dimension(value: any): integer?
     local number = math.tointeger(value)
@@ -105,8 +108,11 @@ function loopback.open(spec: any): (any, string?)
     -- The desktop's end, worded, on a channel of the session's own.
     local ended = channel.new(1)
     local exit = exits.watch(tostring(pid))
+    -- `gone` tells close() the desktop has exited, whoever reads `ended`.
+    local gone = channel.new(1)
     coroutine.spawn(function()
         local result: any = exit:receive()
+        gone:send(true)
         if type(result) == "table" and result.error ~= nil then
             ended:send("the remote desktop failed: " .. tostring(result.error))
         else
@@ -166,9 +172,13 @@ function loopback.open(spec: any): (any, string?)
     function session:close(): boolean
         if state.closed then return true end
         state.closed = true
-        -- Its end is still sent to `ended` (buffered, nobody need read it).
-        -- Cancelling a desktop that has already ended is refused harmlessly.
-        process.cancel(tostring(state.pid), loopback.CLOSE_GRACE)
+        -- Asked, given the grace, then terminated: a cancel is a request.
+        local over = channel.select({gone:case_receive()}, true)
+        if not over.ok or over.default then
+            process.cancel(tostring(state.pid), loopback.CLOSE_GRACE)
+            local picked = channel.select({gone:case_receive(), time.after(loopback.CLOSE_WAIT):case_receive()})
+            if picked.channel ~= gone then process.terminate(tostring(state.pid)) end
+        end
         state.view:close()
         return true
     end

@@ -160,7 +160,7 @@ entries:
       suite: chicago_rdesktop
     source: file://mesh_test.lua
     method: run
-    modules: [channel, time, process, fs]
+    modules: [channel, time, process, fs, security]
     imports:
       test: wippy.test:test
       mesh: chicago.rdesktop:mesh
@@ -187,6 +187,15 @@ entries:
     source: file://crasher.lua
     method: main
     modules: [process]
+
+  # app:stubborn — a producer that does not act on CANCEL (mesh_test).
+  - name: stubborn
+    kind: process.lua
+    meta:
+      comment: A tty producer that ignores CANCEL; only a terminate ends it.
+    source: file://stubborn.lua
+    method: main
+    modules: [tty, process]
 
   # app:viewer_probe — a viewer that vanishes without closing (mesh_test).
   - name: viewer_probe
