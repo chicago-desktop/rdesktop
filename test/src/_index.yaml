@@ -77,12 +77,12 @@ entries:
     kind: function.lua
     meta:
       type: test
-      comment: "The window run as the compositor runs it after a logon — its own viewport, a person's actor, a narrow scope; the remote desktop comes up in it, Alt+Home reaches it, close ends it."
+      comment: "The window run as the compositor runs it after a logon — its own viewport, a person's actor, a narrow scope; the connection screen, Enter to connect, back to the screen with the reason when the desktop ends or the computer refuses, args to connect at once."
       group: Remote Desktop
       suite: chicago_rdesktop
     source: file://window_run_test.lua
     method: run
-    modules: [tty, channel, time, process, security, fs]
+    modules: [tty, channel, time, process, security, fs, system]
     imports:
       test: wippy.test:test
 
@@ -100,6 +100,23 @@ entries:
         - process.send
       resources: "*"
       effect: allow
+
+  - name: connect_test
+    kind: function.lua
+    meta:
+      type: test
+      comment: "The Remote Desktop Connection screen as data — the network from a stand-in membership read through the shell's facts, only known columns, the SDK layout, what each action does."
+      group: Remote Desktop
+      suite: chicago_rdesktop
+    source: file://connect_test.lua
+    method: run
+    modules: [tty]
+    imports:
+      test: wippy.test:test
+      connect: chicago.rdesktop:connect
+      facts: chicago.shell.config:system
+      ui: chicago.shell.sdk:ui
+      cells: chicago.shell.sdk:cells
 
   - name: wire_test
     kind: function.lua

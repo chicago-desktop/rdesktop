@@ -2,15 +2,53 @@
 
 A module of the Chicago shell for the terminal desktop
 ([chicago/shell](https://github.com/chicago-desktop/shell)): **Remote Desktop**
-in Start → Programs → Accessories, a window that shows another Chicago
-desktop and drives it — its screen in the window, this keyboard and mouse on
-it, the window's size its screen size.
+in Start → Programs → Accessories. Pick a computer of the network, Connect,
+and drive its Chicago desktop: its screen in the window, this keyboard and
+mouse on it, the window's size its screen size.
+
+## The connection screen
+
+The window opens on "Remote Desktop Connection". It has three parts:
+
+- **The list**: the computers of the network, from `system.cluster.members()`
+  read through the shell's `chicago.shell.config:system`, the same source as
+  Network Neighborhood (a value or a reason for each field). This computer
+  comes first, marked "(this computer)". A generated node id is captioned by
+  the host name.
+- **The buttons**: Connect (the default) and Cancel.
+- **The status line**: what the network is. "N computers on the network",
+  "No other computers are on the network", "The network is off: this
+  computer is not in a cluster", or the reason the membership could not be
+  read.
+
+To connect: double-click a row, press Enter on the list, or press Connect.
+The arrows move the selection, Esc is Cancel, F5 reads the network again.
+
+Only what is known is shown. The membership says which computers are in the
+cluster and the address each advertises. It does not say whether a computer
+serves Remote Desktop, whether it is reachable, or what role any node but
+this one has. So there is a Computer column, an Address column only when a
+member advertises one, and no "Status" column, which would say "Online" for
+every member and measure nothing.
+
+The logon is not this window's. The remote computer asks for it with its own
+"Welcome to Chicago" inside the session; the screen ends at Connect.
+
+A refused connection comes back to this screen: the computer is not
+accessible, it does not offer the desktop, or it did not answer. An ended
+session comes back too: the desktop was shut down, its node left, or its
+server died. The reason stands whole above the buttons, so the person can
+connect again without closing the window.
+
+Args: `{"computer": "<node id>"}` connects to that computer at once and skips
+the screen; this is how Network Neighborhood can open it for a node. A
+failure there still lands on the screen with the reason. No args shows the
+screen.
 
 Two transports carry a session, behind one interface (below):
 
-- **mesh** — the window's transport. The desktop runs on a node of the
-  cluster (`{"computer": "<node id>"}` in the window's args; none is this
-  node), served there by that node's **broker**.
+- **mesh** — the window's transport. The desktop runs on the node picked on
+  the connection screen, served there by that node's **broker**.
 - **loopback** — the desktop in a local tty viewport on this node, started
   with the window's own rights. It proves the viewer half without a network.
 
@@ -24,10 +62,14 @@ nothing says so.
 ## Inside
 
 - `chicago.rdesktop:window` — the window: a custom **cells** window with its
-  own loop (the SDK's custom-window contract, `docs/sdk.md`), because its
-  content is another desktop's styled terminal rows, which no declarative
-  component carries. It opens a session, presents the remote rows, forwards
+  own loop (the SDK's custom-window contract, `docs/sdk.md`), because a
+  session's content is another desktop's styled terminal rows, which no
+  declarative component carries. It has two screens: the connection screen,
+  drawn and driven by the SDK's own pure halves (`ui.plan`, `cells.rows`,
+  `ui.event`), and the session, which presents the remote rows, forwards
   keys, the mouse and pastes, and resizes the remote screen with itself.
+- `chicago.rdesktop:connect` — the connection screen as data: the computers,
+  the tree, what each action does; pure.
 - `chicago.rdesktop:mesh` — the mesh transport, the viewer's end of the
   session protocol.
 - `chicago.rdesktop:broker` (+ `broker.service`) — "Remote Desktop is
@@ -104,8 +146,8 @@ combinations apply to" is not the remote computer:
 
 That is the **remote** key mode, the default. The window opened with args
 `{"keys": "local"}` forwards every key as it arrives and maps nothing. Every
-other key, Esc included, goes to the remote desktop unchanged in both modes;
-when the session has ended, Esc closes the window.
+other key, Esc included, goes to the remote desktop unchanged in both modes
+while a session is on; on the connection screen Esc is Cancel.
 
 ## The mesh: broker, sessions, wire
 

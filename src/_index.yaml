@@ -65,6 +65,13 @@ entries:
     imports:
       input: chicago.tui_desktop.desktop:input
 
+  # chicago.rdesktop:connect
+  - name: connect
+    kind: library.lua
+    meta:
+      comment: "The Remote Desktop Connection screen — the network's computers (this one first), Connect, Cancel and the status line, as an SDK tree; pure."
+    source: file://connect.lua
+
   # chicago.rdesktop:loopback
   #
   # The loopback transport: a local tty viewport, the desktop spawned into
@@ -234,7 +241,7 @@ entries:
       height: 28
       window_type: app
       resizable: true
-      comment: "Remote Desktop — another Chicago desktop in a window, on a node of the cluster (args computer); keys mapped for the combinations the local desktop takes."
+      comment: "Remote Desktop — pick a computer of the network, connect, drive its Chicago desktop; args computer connects at once; keys mapped for the combinations the local desktop takes."
     source: file://window.lua
     method: main
     modules: [tty, json, channel]
@@ -243,6 +250,10 @@ entries:
       frames: chicago.rdesktop:frames
       inputs: chicago.rdesktop:inputs
       input: chicago.tui_desktop.desktop:input
+      connect: chicago.rdesktop:connect
+      facts: chicago.shell.config:system
+      ui: chicago.shell.sdk:ui
+      cells: chicago.shell.sdk:cells
     security:
       policies:
         - chicago.rdesktop:viewing
