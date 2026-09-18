@@ -1,6 +1,6 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('init', 'setup', 'check', 'lint', 'test', 'icons', 'verify', 'release-check', 'publish')]
+    [ValidateSet('init', 'setup', 'check', 'lint', 'test', 'verify', 'release-check', 'publish')]
     [string]$Target = 'verify',
     [string]$Organization,
     [string]$ModuleName,
@@ -91,7 +91,6 @@ switch ($Target) {
     'check' { Invoke-Check }
     'lint' { Invoke-Lint }
     'test' { Invoke-Test }
-    'icons' { Invoke-Checked $Python @('tools/hello_icon.py') }
     'verify' { Invoke-Verify }
     'release-check' {
         Invoke-Verify

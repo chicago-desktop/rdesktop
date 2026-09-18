@@ -1,6 +1,6 @@
 organization: chicago
 module: rdesktop
-description: A sample module for the Chicago desktop, made from the Chicago module template — one window on the shell SDK (chicago/shell), with its tests and its image pack.
+description: Remote Desktop for the Chicago desktop — a window that shows another Chicago desktop and drives it, behind a session interface a network transport can implement; the loopback transport runs that desktop on this node.
 license: MIT
 repository: https://github.com/chicago-desktop/rdesktop
 homepage: https://wippy.ai
@@ -24,8 +24,5 @@ exclude:
   - ".wippy/**"
   - ".wippy:**"
 # `wippy publish` packs the entries of src/ and embeds only the fs.directory
-# entries named here (they become fs.embed in the package). The image pack
-# lies outside src/, so without this line the published module has no
-# pictures. Add every pack and asset directory your module declares.
-embed:
-  - chicago.rdesktop:images
+# entries named here. The module declares none: its picture is the shell's
+# catalog icon `dialup`.

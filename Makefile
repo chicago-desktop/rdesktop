@@ -28,7 +28,7 @@ WIPPY ?= $(CURDIR)/../runtime/dist/wippy-linux-amd64
 # pick one by itself; the suites run on the application's ordinary host.
 TEST_HOST := wippy.terminal:host
 
-.PHONY: init setup check lint test icons verify release-check publish
+.PHONY: init setup check lint test verify release-check publish
 
 # One-time: rename the template's identity to this module's. Refuses to run
 # twice with a different identity; see scripts/init-module.mjs --help.
@@ -64,10 +64,6 @@ lint:
 test:
 	mkdir -p test/.wippy
 	cd test && $(WIPPY) test --host $(TEST_HOST) 2>&1 | tee .wippy/last-test-run.log && ! grep -q "No tests found" .wippy/last-test-run.log
-
-# Redraw the image pack (assets/images/{32,16}/hello.png).
-icons:
-	python3 tools/hello_icon.py
 
 verify: setup check lint test
 

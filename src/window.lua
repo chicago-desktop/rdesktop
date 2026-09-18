@@ -1,36 +1,138 @@
--- The sample window's process: the shell SDK's loop over the pure `view`.
+-- Remote Desktop — a window that shows another desktop and drives it.
 --
--- `app.main(definition)` returns the `main` the registry entry names. The
--- compositor calls it in cells (a tty viewport) or in pixels (a state
--- provider for the shared renderer); the SDK hides the difference, the
--- window sees `init`, `view` and `update` either way.
-local app = require("app")
-local view = require("view")
+-- A custom cells window (the SDK's "custom window" contract, docs/sdk.md):
+-- the content is the remote desktop's styled terminal rows, which no
+-- declarative component carries, so the window owns its loop. It draws on
+-- its own tty port, which the local compositor gives it as for any cells
+-- window, and it reaches the remote desktop only through the session
+-- interface of the library imported as `transport` (see loopback.lua): the
+-- tty Viewport's snapshot, updates, send, resize and close, and ended.
+--
+-- The loop: a watermark on `updates` asks for the next delta, acknowledging
+-- the revision the window has applied — one frame in flight; the delta is
+-- applied to a copy and presented; keys and the mouse go to the remote desktop (keys through the
+-- key mode of chicago.rdesktop:inputs); a resize of this window resizes the
+-- remote screen, so the remote desktop is always laid out for the size it
+-- is shown at.
+--
+-- Cells only: a viewport snapshot has rows, a cursor and a revision — no
+-- rasters — so the remote desktop is shown as its cells rendering, whatever
+-- the local desktop draws its own chrome with.
+local tty = require("tty")
+local json = require("json")
+local channel = require("channel")
+local transport = require("transport")
+local frames = require("frames")
+local inputs = require("inputs")
+local input = require("input")
 
-local definition = {}
+-- The desktop the loopback session starts: the Chicago shell, on the host
+-- that runs the local desktop's windows. Fixed here, not taken from the
+-- window's args: the window runs with the rights that desktop needs, and an
+-- entry named by whoever opens the window would run with them too.
+local TARGET = {entry = "chicago.shell:shell", host = "chicago.tui_desktop:workers"}
 
--- An Esc that `update` did not take (returned false) closes the window.
-definition.close_on_escape = true
-
--- init(args, context) — once, when the window opens. `context` has the
--- client size (`width`, `height`), `native` (pixels or cells), `close()`,
--- `after(duration, tag)` for a one-shot timer and `watch(ch)` for a channel.
-function definition.init(args: any, context: any): any
-    return view.init(args)
+-- options(args) -> {keys}
+--
+-- The window's args are a JSON object (`desktop.open` carries them as a
+-- string): `{"keys": "local"}` switches the key mode. Anything unreadable is
+-- the default.
+local function options(args: any): any
+    local decoded: any = nil
+    if type(args) == "string" and args ~= "" then
+        local value, err = json.decode(args)
+        if err == nil and type(value) == "table" then decoded = value end
+    end
+    return {keys = inputs.mode(decoded and decoded.keys)}
 end
 
--- view(model, context) — the tree for the current model; read no files and
--- send no messages here.
-function definition.view(model: any, context: any): any
-    local tree = view.tree(model, context)
-    return tree
+local function main(args: any)
+    assert(tty.start())
+    local events = assert(tty.events())
+    local surface = assert(tty.surface({hide_cursor = true, synchronized_output = true}))
+
+    -- Mutable loop state lives in a table (go-lua and pcall, AGENTS.md).
+    local run: any = {
+        width = 1, height = 1,
+        options = options(args),
+        session = nil,
+        notice = nil,
+        screen = nil,
+    }
+    run.width, run.height = tty.screen_size()
+    run.screen = frames.blank(run.width, run.height)
+
+    local function present()
+        local canvas = tty.canvas(run.width, run.height)
+        canvas:clear()
+        canvas:put_rows(1, 1, frames.compose(run.screen, run.width, run.height, run.notice), run.width)
+        local cursor: any = run.screen.cursor
+        local shown = run.notice == nil and type(cursor) == "table" and cursor.visible == true
+        surface:present(canvas:rows(), {cursor = {
+            x = shown and cursor.x or 1, y = shown and cursor.y or 1, visible = shown,
+        }})
+    end
+
+    run.notice = "Connecting to " .. TARGET.entry .. "..."
+    present()
+    local session, why = transport.open({
+        entry = TARGET.entry, host = TARGET.host, width = run.width, height = run.height,
+    })
+    if session then
+        run.session = session
+    else
+        run.notice = "Could not connect: " .. tostring(why) .. " (Esc closes)"
+    end
+    present()
+
+    while true do
+        local cases = {events:case_receive()}
+        local session: any = run.session
+        if session then
+            cases[#cases + 1] = session:updates():case_receive()
+            cases[#cases + 1] = session:ended():case_receive()
+        end
+        local picked = channel.select(cases)
+        if picked.channel == events then
+            if not picked.ok then break end
+            local event: any = input.normalize(picked.value)
+            if event.type == "close" then break end
+            if event.type == "resize" then
+                run.width, run.height = tty.screen_size()
+                if session then session:resize(run.width, run.height) end
+                surface:invalidate()
+                present()
+            elseif session == nil then
+                -- Nothing to drive: the session never opened or has ended.
+                if event.type == "key" and event.action ~= "release" and event.key_type == "esc" then break end
+            elseif event.type == "key" then
+                session:send(inputs.key(event, run.options.keys))
+            elseif event.type == "mouse" then
+                session:send(inputs.mouse(event, run.width, run.height))
+            elseif event.type == "paste" then
+                session:send({type = "paste", text = event.text})
+            end
+        elseif session and picked.channel == session:updates() then
+            -- The revision the window shows is the acknowledgement: the next
+            -- delta is cut from it, and nothing more is asked for until this
+            -- one is applied.
+            local delta = session:snapshot(run.screen.revision)
+            if delta then
+                frames.apply(run.screen, delta)
+                run.notice = nil
+                present()
+            end
+        elseif session then
+            -- `ended`: the remote desktop is gone (or its viewport closed).
+            session:close()
+            run.session = nil
+            run.notice = tostring(picked.value or "the remote desktop ended") .. " (Esc closes)"
+            present()
+        end
+    end
+
+    if run.session then run.session:close() end
+    pcall(tty.stop)
 end
 
--- update(model, action, context) — one action; return false when nothing
--- changed so the SDK skips the redraw.
-function definition.update(model: any, action: any, context: any): boolean
-    local changed = view.update(model, action, context)
-    return changed
-end
-
-return {main = app.main(definition), definition = definition}
+return {main = main, options = options, TARGET = TARGET}

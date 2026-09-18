@@ -23,13 +23,15 @@ in full before changing the repository.
   --host wippy.terminal:host` in `test/`), never from the module root: the
   harness is the application that boots the module with the shell. The host
   is named because the shell brings a terminal host of its own.
-- **The window is data, the process is thin.** Everything a test should see
-  goes into the pure `view` library (`src/view.lua`); `src/window.lua` runs
-  it with `app.main`. Use the SDK as documented in `docs/sdk.md` and the
-  skill in `skills/wippy-window-app/SKILL.md`: the compositor owns the frame,
-  the tree is plain tables, every interactive component has a stable `id`.
-- **Report actual tests and what they saw**: the shot in `test/shots/` is
-  evidence for the eye; a green run is not proof a window looks right.
+- **The window talks to the remote desktop only through the session
+  interface** (`src/loopback.lua` documents it; README, "The session
+  interface"). Nothing in `src/window.lua` may touch a tty viewport or a pid
+  directly: the network transport replaces the `transport:` import and
+  nothing else. Keep the logic a test should see in the pure libraries
+  (`src/frames.lua`, `src/inputs.lua`).
+- **Report actual tests and what they saw**: the screens in `test/shots/`
+  (text) are evidence for the eye; a green run is not proof the remote
+  desktop was on the screen.
 
 ## Commands
 
@@ -37,7 +39,7 @@ in full before changing the repository.
 make setup          # resolve dependencies (both wippy.lock files)
 make check          # identity, dependency ranges, embed list, tips, test form, no Cyrillic
 make lint           # tools/late-locals.py, then wippy lint of this namespace and the harness
-make test           # the harness's suites; writes test/shots/*.png
+make test           # the harness's suites; writes test/shots/*.txt
 make verify         # all of the above; what CI runs
 make release-check  # verify + an authenticated publish dry run
 make publish        # public by default; VIS=private otherwise

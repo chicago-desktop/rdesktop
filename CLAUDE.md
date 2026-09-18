@@ -16,9 +16,9 @@ What to know before the first edit:
   in `src/_index.yaml`); an older one refuses that dependency. The Makefile's
   `WIPPY` names the build; `make lint` with a release `wippy` verifies nothing.
 - **`make test` runs the harness in `test/`** with `--host
-  wippy.terminal:host`; it writes `test/shots/hello.png`, the window as the
-  shell's renderer drew it. Look at the picture: the geometry checks do not
-  see a wrong colour or a caption a pixel off.
+  wippy.terminal:host`; it writes `test/shots/*.txt`, the remote desktop's
+  screens as the tests saw them. Read them: an assertion only says a word
+  was found.
 - **A `local` declared below the function that reads it is a nil global**,
   silently — `python3 tools/late-locals.py src test/src` finds it, `wippy
   lint` does not.

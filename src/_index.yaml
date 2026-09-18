@@ -1,10 +1,15 @@
 version: "1.0"
 namespace: chicago.rdesktop
 
-# A module of the Chicago shell (chicago/shell): one sample window on the
-# shell's SDK, split in two — `view` is the window as data (a pure library
-# the tests exercise) and `window` is the process that runs it — plus the
-# module's own image pack for the window's picture.
+# Remote Desktop for the Chicago shell: a window that shows another desktop
+# and drives it — its rows on this screen, this keyboard and mouse on it.
+#
+# The window reaches the other desktop only through a session interface
+# (open, channels, notice, snapshot, send, resize, close; loopback.lua says
+# what each one does). This version has one transport, the loopback — the
+# "remote" desktop is a Chicago shell in a local tty viewport on this node.
+# A network transport implements the same interface; the window switches
+# to it by its `transport:` import alone.
 #
 # Keep the comments of this file free of an unquoted `: ` — a colon followed
 # by a space inside a meta.comment or a YAML comment value breaks the parse
@@ -15,107 +20,115 @@ entries:
     kind: ns.definition
     meta:
       title: Remote Desktop
-      description: A sample module for the Chicago desktop, made from the Chicago module template — one window on the shell SDK.
+      description: A window that shows another Chicago desktop and drives it; the loopback transport runs that desktop on this node.
 
   # ─── Dependencies ────────────────────────────────────────────────────
-  # The shell and the base are resolved from their GitHub repositories by
-  # tag — `component` names the repository, the module keeps its own name
-  # (chicago/shell, chicago/tui-desktop) in the lock. A compatibility range,
-  # never an exact version: the lock holds the exact one, and the range says
-  # what the module was written against (v0.2.0 is the first tag of both).
   - version: ">=0.2.0"
     name: dep.chicago.shell
     kind: ns.dependency
     meta:
-      comment: The Chicago shell — its SDK lays out and draws the window, its image packs bring the pictures.
+      comment: The Chicago shell — the desktop the loopback session starts, and its security policies.
     component: github.com/chicago-desktop/shell
 
   - version: ">=0.2.0"
     name: dep.chicago.tui_desktop
     kind: ns.dependency
     meta:
-      comment: The desktop base — the compositor that owns the window's frame, size and input.
+      comment: The desktop base — the compositor that owns the window's frame, size and input, its input normalizer and its window host.
     component: github.com/chicago-desktop/tui-desktop
 
-  # chicago.rdesktop:images
-  #
-  # An image pack of the shell (`meta.type: chicago.images`; the shell's
-  # docs/icons.md, "Image packs"): PNG files lie as `<size>/<name>.png` and
-  # the window names one `chicago.rdesktop:images/hello`. The pack
-  # lives outside src/, so wippy.yaml lists it under `embed:` — without that
-  # the published module has no pictures.
-  - name: images
-    kind: fs.directory
-    meta:
-      type: chicago.images
-      comment: "The module's pictures — the sample window's balloon at 32 and 16 px, an image pack of the shell."
-    base: module
-    directory: ./assets/images
-    auto_init: false
-
-  # chicago.rdesktop:view
-  - name: view
+  # chicago.rdesktop:frames
+  - name: frames
     kind: library.lua
     meta:
-      comment: "The sample window as data — the component tree of a model (the menu, a line of text, a button that counts its clicks, the status bar, About) and what an action does to it; pure over the model."
-    source: file://view.lua
+      comment: "The remote screen as row deltas — what changed since the previous delta, applying a delta to the window's copy, the rows at the window's size; pure."
+    source: file://frames.lua
+
+  # chicago.rdesktop:inputs
+  - name: inputs
+    kind: library.lua
+    meta:
+      comment: "What the viewer forwards — the key mode that maps the combinations the local compositor takes (Alt+Page Up for Alt+Tab, Ctrl+Alt+End for Ctrl+Q …) and mouse coordinates pinned to the remote screen; pure."
+    source: file://inputs.lua
     imports:
-      ui: chicago.shell.sdk:ui
+      input: chicago.tui_desktop.desktop:input
+
+  # chicago.rdesktop:loopback
+  #
+  # The loopback transport: a local tty viewport, the desktop spawned into
+  # it with the viewport's grant, row deltas computed from its snapshots.
+  - name: loopback
+    kind: library.lua
+    meta:
+      comment: The loopback transport of a remote-desktop session — the remote desktop in a local tty viewport on this node.
+    source: file://loopback.lua
+    modules: [tty, process]
+    imports:
+      frames: chicago.rdesktop:frames
+
+  # chicago.rdesktop:session_spawn
+  #
+  # What the window itself needs to run the loopback session: start the
+  # desktop on the base's window host with the viewport's grant, watch it,
+  # and cancel it when the window closes.
+  - name: session_spawn
+    kind: security.policy
+    meta:
+      comment: Start the loopback desktop on the window host, monitor it and cancel it on close.
+    policy:
+      actions:
+        - process.context
+        - process.spawn
+        - process.spawn.monitored
+        - process.monitor
+        - process.host
+        - process.terminate
+      resources: "*"
+      effect: allow
 
   # chicago.rdesktop:window
   #
-  # The Start menu finds a `process.lua` with `meta.type: tui_desktop.window`.
-  # `group` is the menu folder (a module's windows go under Programs/<Module>),
-  # `image` the picture in the menu and the title bar, `icon` its character
-  # for a terminal without graphics, `width`/`height` the outer size in
-  # cells. `pixel_render` + `pixel_state` make the window draw through the
-  # shell's shared renderer in graphics mode; in cells the same process draws.
+  # A cells window (no pixel_render): the remote desktop arrives as styled
+  # terminal rows. The desktop it starts runs under this window's identity,
+  # so the window carries the shell's own two policies besides its own — the
+  # loopback desktop is a shell, and a shell without them does not come up.
+  # The desktop it starts is fixed in window.lua, never taken from args.
   - name: window
     kind: process.lua
     meta:
       type: tui_desktop.window
-      title: Hello Window
-      image: chicago.rdesktop:images/hello
-      icon: "☺"
-      group: Programs/Remote Desktop
+      title: Remote Desktop
+      image: dialup
+      icon: "▣"
+      group: Programs/Accessories
       order: 100
-      width: 42
-      height: 14
+      width: 84
+      height: 28
       window_type: app
       resizable: true
-      pixel_render: chicago.shell.sdk:render
-      pixel_state: chicago.rdesktop:window
-      comment: "Hello Window — a sample window on the shell SDK with a menu, a line of text, a button that counts its clicks and a status bar."
+      comment: "Remote Desktop — another Chicago desktop in a window (loopback transport, a shell on this node); keys mapped for the combinations the local desktop takes."
     source: file://window.lua
     method: main
+    modules: [tty, json, channel]
     imports:
-      app: chicago.shell.sdk:app
-      view: chicago.rdesktop:view
-    # The shell's policy for a view window's state provider: the process
-    # context, the compositor's name in the process registry, sending it
-    # the state. Add a policy of your own only for what your window reads.
+      transport: chicago.rdesktop:loopback
+      frames: chicago.rdesktop:frames
+      inputs: chicago.rdesktop:inputs
+      input: chicago.tui_desktop.desktop:input
     security:
-      policies: [chicago.shell.security:view_state]
+      policies:
+        - chicago.rdesktop:session_spawn
+        - chicago.shell.security:shell_runtime
+        - chicago.shell.security:shell_env
 
   # chicago.rdesktop:tip
-  #
-  # A "Did you know..." tip for the Welcome window (chicago/welcome), which
-  # reads every `registry.entry` with `meta.type: chicago.tip`, ordered by
-  # `meta.order` and then by id (its own tips use 10 to 130). In `data`,
-  # `text` is the tip, one short paragraph (a tip without it is skipped);
-  # `image` is optional, a square pack picture `<pack entry>/<file>` drawn at
-  # 32 px or an illustration `<pack entry>/pictures/<file>` shown 100 px high;
-  # `open` is the window the Show Me button opens and `args` what it is
-  # opened with (a string, or a table sent as JSON). No dependency on
-  # chicago/welcome is needed; where it is not installed the entry is inert.
-  # Rewrite the text for your program, or delete the entry and its test.
   - name: tip
     kind: registry.entry
     meta:
       type: chicago.tip
       order: 500
-      comment: "Welcome tip — opening Hello Window from the Start menu; Show Me opens it."
+      comment: "Welcome tip — Remote Desktop and its key combinations; Show Me opens it."
     data:
-      text: "Hello Window counts your clicks. To open it, click Start, point to Programs, then Remote Desktop, and click Hello Window."
-      image: chicago.rdesktop:images/hello
+      text: "Remote Desktop shows another desktop in a window. The keys your own desktop keeps reach it differently - Alt+Page Up switches its windows, Alt+Home opens its Start menu, Ctrl+Alt+End shuts it down."
+      image: dialup
       open: chicago.rdesktop:window

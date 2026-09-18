@@ -9,7 +9,7 @@ namespace: app
 #
 # Every test entry is a function.lua with `meta.type: test`; `wippy test`
 # runs the ones it discovers. A test file must be in the run_cases form
-# (see view_test.lua) — the other form is counted, printed green and never
+# (see frames_test.lua) — the other form is counted, printed green and never
 # executed.
 
 entries:
@@ -17,76 +17,107 @@ entries:
     kind: ns.definition
     meta: {title: Remote Desktop Test Harness}
 
-  - name: view_test
+  - name: frames_test
     kind: function.lua
     meta:
       type: test
-      comment: "The sample window as data — the initial tree, the click count, Exit, About, the layout in cells, and test/shots/hello.png drawn by the shell's renderer."
+      comment: "Row deltas — the first delta is full, then only changed rows, a size change is full again; applying them; the rows at the window's size with a notice."
       group: Remote Desktop
       suite: chicago_rdesktop
-    source: file://view_test.lua
+    source: file://frames_test.lua
     method: run
-    # `gfx` and `fs` for the shot: the font arrives as bytes read from
-    # app:system_fonts, the PNG is written to app:shots.
-    modules: [tty, gfx, fs]
     imports:
       test: wippy.test:test
-      ui: chicago.shell.sdk:ui
-      app: chicago.shell.sdk:app
-      render: chicago.shell.sdk:render
-      rasters: chicago.shell.theme:rasters
-      view: chicago.rdesktop:view
+      frames: chicago.rdesktop:frames
+
+  - name: inputs_test
+    kind: function.lua
+    meta:
+      type: test
+      comment: "The key modes — the combinations the local compositor takes arrive mapped in the remote mode and unchanged in the local one; mouse coordinates pinned to the remote screen."
+      group: Remote Desktop
+      suite: chicago_rdesktop
+    source: file://inputs_test.lua
+    method: run
+    imports:
+      test: wippy.test:test
+      inputs: chicago.rdesktop:inputs
+
+  - name: loopback_test
+    kind: function.lua
+    meta:
+      type: test
+      comment: "The loopback transport end to end — a producer in a local viewport through open, snapshot deltas, send, resize and close, and the Chicago shell itself coming up in one on the base's window host."
+      group: Remote Desktop
+      suite: chicago_rdesktop
+    source: file://loopback_test.lua
+    method: run
+    modules: [channel, time, process, fs]
+    imports:
+      test: wippy.test:test
+      loopback: chicago.rdesktop:loopback
+      inputs: chicago.rdesktop:inputs
+      frames: chicago.rdesktop:frames
 
   - name: window_test
     kind: function.lua
     meta:
       type: test
-      comment: "The sample window's process — the registry entry the Start menu reads, the pack's picture found by the shell, and the process running the view."
+      comment: "The window's registry entry — a cells window in Programs/Accessories whose transport is the one import, with the policies the loopback desktop needs; its args parsing."
       group: Remote Desktop
       suite: chicago_rdesktop
     source: file://window_test.lua
     method: run
-    # Reading a pack takes `registry.get` as well as `fs.get`, and `gfx` to
-    # decode the picture.
-    modules: [gfx, fs, registry]
+    modules: [registry]
     imports:
       test: wippy.test:test
-      app: chicago.shell.sdk:app
-      images: chicago.shell.theme:images
-      view: chicago.rdesktop:view
       window: chicago.rdesktop:window
 
-  - name: tip_test
+  - name: window_run_test
     kind: function.lua
     meta:
       type: test
-      comment: "The module's tip for the Welcome window — a chicago.tip entry the window finds, its text, its picture in the pack at 32 px, the window Show Me opens."
+      comment: "The window run as the compositor runs it after a logon — its own viewport, a person's actor, a narrow scope; the remote desktop comes up in it, Alt+Home reaches it, close ends it."
       group: Remote Desktop
       suite: chicago_rdesktop
-    source: file://tip_test.lua
+    source: file://window_run_test.lua
     method: run
-    # `registry.find` is the Welcome window's own query; reading the pack
-    # takes `fs` and `gfx`, as in window_test.
-    modules: [registry, gfx, fs]
+    modules: [tty, channel, time, process, security, fs]
     imports:
       test: wippy.test:test
-      images: chicago.shell.theme:images
-      view: chicago.rdesktop:view
+
+  # app:narrow — the scope a logged-on person's window gets in the test
+  # above; what a view window carries (chicago.shell.security:view_state),
+  # nothing more. The window must bring the rest with its own entry.
+  - name: narrow
+    kind: security.policy
+    meta:
+      comment: A narrow person's scope for window_run_test.
+    policy:
+      actions:
+        - process.context
+        - process.registry
+        - process.send
+      resources: "*"
+      effect: allow
+
+  # app:echo — a producer for loopback_test: draws its size and the last
+  # input it got, and exits on close or cancel.
+  - name: echo
+    kind: process.lua
+    meta:
+      comment: A tty producer for the loopback test — its size and the last input on two rows.
+    source: file://echo.lua
+    method: main
+    modules: [tty, process, channel]
 
   - name: shots
     kind: fs.directory
     meta:
-      comment: Where the window's shot goes.
+      comment: Where loopback_test writes the screens it saw, as text.
     base: project
     directory: ./shots
     auto_init: true
-
-  - name: system_fonts
-    kind: fs.directory
-    meta:
-      comment: System TrueType fonts, read-only — the font arrives in gfx as bytes, not as a path.
-    auto_init: false
-    directory: /usr/share/fonts/truetype/liberation/
 
   - name: db
     kind: db.sql.sqlite
@@ -108,10 +139,10 @@ entries:
 
   # The shell's endpoint entries resolve against these at boot; no suite calls
   # them. The port is apart from the shell harness's :19229 and the other
-  # modules' harnesses, so they can run side by side.
+  # modules' harnesses (19239, 19250-19254), so they can run side by side.
   - name: gateway
     kind: http.service
-    addr: :19239
+    addr: :19260
     lifecycle:
       auto_start: true
 
