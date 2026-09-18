@@ -4,6 +4,9 @@ local process = require("process")
 local channel = require("channel")
 
 local function main()
+    -- A test that wants to know this producer's pid registers the name.
+    local watcher = process.registry.lookup("rdesktop.test.echoes")
+    if watcher then process.send(tostring(watcher), "echo.started", tostring(process.pid())) end
     local events = assert(tty.events())
     assert(tty.start())
     local surface = assert(tty.surface({}))

@@ -23,8 +23,11 @@
 -- dropped and the ack asks for every row.
 --
 -- A session ends when the server says so (closed, failed), when the server
--- session's process exits, or when the server's node leaves the cluster;
--- the reason arrives on `ended()`, never silence.
+-- session's process exits or its node leaves (a LINK_DOWN, trapped: see
+-- exits.lua), when the membership says the node is gone, or when nothing
+-- has confirmed the server for SILENCE_LIMIT while the membership cannot
+-- be read; the reason arrives on `ended()`, never silence — and never the
+-- window's own death.
 local process = require("process")
 local channel = require("channel")
 local time = require("time")
@@ -42,6 +45,14 @@ mesh.OPEN_TIMEOUT = "10s"
 -- How often the server's node is looked for in the cluster's membership.
 mesh.CHECK_EVERY = "2s"
 
+-- How long a session keeps a server nothing confirms — no message from it,
+-- no membership that shows its node — before it ends (milliseconds).
+mesh.SILENCE_LIMIT = 30000
+
+local function now_ms(): integer
+    return math.tointeger(time.now():unix_nano() // 1000000) or 0
+end
+
 -- Module state, one per process: the sessions by number, and one reader of
 -- the protocol topic for all of them.
 local viewer: any = {sessions = {}, next = 0, started = false}
@@ -55,6 +66,7 @@ local function finish(entry: any, reason: string)
 end
 
 local function deliver(entry: any, data: any, from: string)
+    if entry.server == nil or entry.server == from then entry.life = now_ms() end
     if data.k == "opened" and entry.opening then
         entry.server = from
         entry.opening:send({ok = true, width = data.x, height = data.y})
@@ -93,8 +105,14 @@ local function run()
             if next(viewer.sessions) ~= nil then
                 local members = system.cluster.members()
                 for _, entry in pairs(viewer.sessions) do
-                    if wire.present(members, entry.node) == false then
+                    local present = wire.present(members, tostring(entry.node))
+                    if present == true then entry.life = now_ms() end
+                    local verdict = wire.judge(present, math.tointeger(entry.life) or 0, now_ms(), mesh.SILENCE_LIMIT)
+                    if verdict == "gone" then
                         finish(entry, "The connection to " .. entry.node .. " was lost.")
+                    elseif verdict == "expired" and entry.opening == nil then
+                        finish(entry, "Nothing has confirmed " .. entry.node .. " for "
+                            .. tostring(mesh.SILENCE_LIMIT // 1000) .. " s.")
                     end
                 end
             end
@@ -117,7 +135,9 @@ local function watch_server(entry: any)
     process.monitor(server)
     coroutine.spawn(function()
         local result: any = exit:receive()
-        if type(result) == "table" and result.error ~= nil then
+        if type(result) == "table" and result.link_down then
+            finish(entry, "The connection to " .. tostring(entry.node) .. " was lost.")
+        elseif type(result) == "table" and result.error ~= nil then
             finish(entry, "The remote session failed: " .. tostring(result.error))
         else
             finish(entry, "The remote session ended.")
@@ -138,6 +158,8 @@ function mesh.open(spec: any): (any, string?)
         if not own then return nil, "this computer has no node id: " .. tostring(err) end
         node = tostring(own)
     end
+    -- Before any monitor: a departure must arrive as an event (exits.lua).
+    exits.trap()
     -- `broker` names another broker (tests); a window never passes it.
     local name = type(spec.broker) == "string" and spec.broker ~= "" and spec.broker or wire.broker_name(node)
     local broker_pid = process.registry.lookup(name)
@@ -146,7 +168,7 @@ function mesh.open(spec: any): (any, string?)
     end
 
     viewer.next = viewer.next + 1
-    local entry: any = {number = viewer.next, node = node, server = nil, pending = nil, received = 0,
+    local entry: any = {number = viewer.next, node = node, server = nil, pending = nil, received = 0, life = now_ms(),
         handed = nil, over = false, opening = channel.new(1),
         updates = channel.new(1), ended = channel.new(1)}
     viewer.sessions[entry.number] = entry

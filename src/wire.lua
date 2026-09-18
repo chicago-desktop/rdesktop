@@ -159,6 +159,22 @@ function wire.delta(message: any): (any, string?)
         rows = rows, cursor = cursor, full = changed == height, changed = changed}, nil
 end
 
+-- judge(present, last_life, now, ceiling) -> "gone" | "here" | "unknown" | "expired"
+--
+-- What a session does about the other side, in three states and a ceiling.
+-- `present` is wire.present's answer. Gone (the membership says so) ends
+-- the session; here keeps it. Unknown (the membership could not be read —
+-- a node that lost its quorum answers nothing) keeps it too, but not for
+-- ever: with no sign of the other side — a message from it, or a
+-- membership that confirmed it — for longer than `ceiling` it is expired,
+-- and the session ends. Times are in milliseconds.
+function wire.judge(present: boolean?, last_life: integer, now: integer, ceiling: integer): string
+    if present == false then return "gone" end
+    if present == true then return "here" end
+    if now - last_life > ceiling then return "expired" end
+    return "unknown"
+end
+
 -- present(members, node) -> boolean | nil
 --
 -- Whether `node` is in a `system.cluster.members()` answer; nil when the

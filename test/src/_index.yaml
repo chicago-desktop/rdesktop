@@ -168,6 +168,26 @@ entries:
       inputs: chicago.rdesktop:inputs
       frames: chicago.rdesktop:frames
 
+  # app:link_probe / app:crasher — a watcher of a linked child that fails
+  # (mesh_test): the LINK_DOWN a node's departure sends to monitors too.
+  - name: link_probe
+    kind: process.lua
+    meta:
+      comment: Watches a linked child that fails and reports what it was told.
+    source: file://link_probe.lua
+    method: main
+    modules: [process]
+    imports:
+      exits: chicago.rdesktop:exits
+
+  - name: crasher
+    kind: process.lua
+    meta:
+      comment: Fails on request.
+    source: file://crasher.lua
+    method: main
+    modules: [process]
+
   # app:viewer_probe — a viewer that vanishes without closing (mesh_test).
   - name: viewer_probe
     kind: process.lua

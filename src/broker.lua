@@ -10,6 +10,10 @@
 --
 -- It offers ONE desktop: `open` names no entry (the server's default) or
 -- exactly that one; a viewer does not choose what runs on this computer.
+--
+-- It watches the sessions it starts. A session that fails — a refused
+-- spawn raises rather than returns, so it dies before it can answer — is
+-- told to its viewer as `failed` with the error, never left to a timeout.
 local process = require("process")
 local channel = require("channel")
 local system = require("system")
@@ -72,12 +76,24 @@ function broker.main(options: any)
 
     local inbox = process.listen(wire.TOPIC, {message = true})
     local lifecycle = process.events()
+    -- The viewer and number of every session this broker started, by pid.
+    local sessions: any = {}
     while true do
         local picked = channel.select({inbox:case_receive(), lifecycle:case_receive()})
         if not picked.ok then break end
         if picked.channel == lifecycle then
             local event: any = picked.value
             if type(event) == "table" and event.kind == process.event.CANCEL then break end
+            if type(event) == "table" and event.kind == process.event.EXIT then
+                local started: any = sessions[tostring(event.from)]
+                sessions[tostring(event.from)] = nil
+                local result: any = event.result
+                if started and type(result) == "table" and result.error ~= nil then
+                    log:error("session failed", {viewer = started.viewer, error = tostring(result.error)})
+                    wire.send(tostring(started.viewer), {k = "failed", s = started.number,
+                        m = "The remote session failed: " .. tostring(result.error)})
+                end
+            end
         else
             local message: any = picked.value
             local data: any = message:payload():data()
@@ -93,9 +109,11 @@ function broker.main(options: any)
                 elseif session_host == nil then
                     wire.send(viewer, {k = "failed", s = number, m = "The remote computer cannot start sessions."})
                 else
-                    local pid, serr = process.spawn(broker.SESSION, session_host, viewer, number,
+                    local pid, serr = process.spawn_monitored(broker.SESSION, session_host, viewer, number,
                         data.x, data.y, served.entry, served.host)
-                    if not pid then
+                    if pid then
+                        sessions[tostring(pid)] = {viewer = viewer, number = number}
+                    else
                         log:error("session not started", {viewer = viewer, error = tostring(serr)})
                         wire.send(viewer, {k = "failed", s = number,
                             m = "The remote computer could not start a session: " .. tostring(serr)})

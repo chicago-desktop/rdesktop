@@ -199,13 +199,32 @@ never sent. A frame goes out as soon as the ack allows, and the viewer keeps
 it until its window asks, so the window does not wait on the network. The
 ack goes out as the frame is handed over.
 
-**Ends.** The window's last row always says why a session ended.
+**Ends.** The window never dies silently. The session window hands the
+reason back to the connection window.
 
 - Serving side: the session cancels its desktop and exits when the viewer
-  closes it, when the viewer's process exits (monitor), or when the viewer's
-  node leaves `system.cluster.members()` (checked every 2 s).
-- Viewer side: the session ends on `closed` / `failed`, when the serving
-  session's process exits, or when the serving node leaves the membership.
+  closes it, when the viewer's process exits, when the viewer's node
+  leaves, or when the membership says the node is gone (checked every 2 s).
+  If the membership cannot be read (a node that lost its quorum answers
+  nothing), the session holds on, but with a ceiling: with no message from
+  the viewer and no membership confirming it for 30 s, it ends. Not knowing
+  is not leaving, and it is not staying for ever either (`wire.judge`).
+- Viewer side: the same, mirrored — `closed` / `failed`, the serving
+  session's exit, its node leaving, the membership, the same ceiling.
+- **A departed node is a LINK_DOWN, not an EXIT.** When a node leaves, the
+  runtime sends LINK_DOWN to every local process that monitors *or* links a
+  pid there (`system/topology` `HandleNodeExit`). A process without
+  `trap_links` is terminated by it ("linked process failed").
+  - Found on the two-node stand: the viewer's window vanished at "node
+    left", and the serving session died without ending its desktop.
+  - Fix: every session process traps links before its first monitor or link
+    (`exits.trap`), and `exits` delivers LINK_DOWN as an end, like EXIT.
+- The desktop is **linked** to its serving session (`spawn_linked_monitored`,
+  loopback too). A session that dies any other way takes its desktop with
+  it; no orphaned desktop runs unseen.
+- A refused spawn raises rather than returns, so a session can die before
+  it answers. The broker watches its sessions and tells the viewer
+  `failed` with the error, never a timeout.
 
 **Without a cluster** the runtime has no EVENTUAL registry ("eventual
 registry not available"). Only then does the broker take its name locally

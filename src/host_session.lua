@@ -15,8 +15,12 @@
 --
 -- The session ends — the desktop is cancelled, the viewport closed, the
 -- process exits — when the viewer closes it, when the viewer's process
--- exits, when the viewer's node leaves the cluster, or when the desktop
--- ends by itself (the viewer is told why).
+-- exits or its node leaves (a LINK_DOWN, trapped: see exits.lua), when the
+-- membership says the viewer's node is gone, when nothing has confirmed the
+-- viewer for SILENCE_LIMIT while the membership cannot be read, or when the
+-- desktop ends by itself (the viewer is told why). The desktop is LINKED to
+-- this process: should the session die any other way, the desktop goes
+-- with it instead of living on unseen.
 local tty = require("tty")
 local process = require("process")
 local channel = require("channel")
@@ -32,6 +36,10 @@ local host_session = {}
 -- How often the viewer's node is looked for in the cluster's membership.
 host_session.CHECK_EVERY = "2s"
 
+-- How long a session keeps a viewer nothing confirms — no message from it,
+-- no membership that shows its node — before it ends (milliseconds).
+host_session.SILENCE_LIMIT = 30000
+
 -- How long the desktop gets to shut down when the session ends.
 host_session.CLOSE_GRACE = "5s"
 
@@ -42,6 +50,10 @@ host_session.CLOSE_GRACE = "5s"
 local function base_of(state: any, revision: any): any
     if state.sent_revision == nil or revision ~= state.sent_revision or not state.sent_last then return nil end
     return state.sent_last
+end
+
+local function now_ms(): integer
+    return math.tointeger(time.now():unix_nano() // 1000000) or 0
 end
 
 -- forward(view, event) — a viewer's event into the viewport; one the
@@ -56,6 +68,8 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
     local number = math.tointeger(session) or 0
     viewer = tostring(viewer)
     local viewer_node = wire.node_of(viewer)
+    -- Before any link or monitor: a departure must arrive as an event.
+    exits.trap()
     local inbox = process.listen(wire.TOPIC, {message = true})
 
     local function fail(reason: string)
@@ -70,7 +84,7 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
     local updates = assert(view:updates())
     local grant = assert(view:grant())
     local desktop, derr = process.with_options({terminal = grant})
-        :spawn_monitored(tostring(entry), tostring(host))
+        :spawn_linked_monitored(tostring(entry), tostring(host))
     if not desktop then
         view:close()
         return fail("the remote computer could not start its desktop: " .. tostring(derr))
@@ -82,7 +96,7 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
 
     -- Mutable state in a table (go-lua and pcall).
     local state: any = {inflight = false, acked = -1, sent_revision = nil, sent_last = nil,
-        reason = nil, tell = true}
+        reason = nil, tell = true, life = now_ms()}
 
     wire.send(viewer, {k = "opened", s = number, x = cols, y = rows})
 
@@ -109,6 +123,7 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
             local data: any = message:payload():data()
             if tostring(message:from()) == viewer and type(data) == "table"
                 and math.tointeger(data.s) == number then
+                state.life = now_ms()
                 if data.k == "ack" then
                     local revision = math.tointeger(data.r)
                     if base_of(state, revision) then
@@ -137,12 +152,23 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
                 and ("The remote desktop failed: " .. tostring(result.error)) or "The remote desktop ended."
             desktop = nil
         elseif picked.channel == viewer_exit then
-            state.reason, state.tell = "the viewer's process is gone", false
+            local result: any = picked.value
+            if type(result) == "table" and result.link_down then
+                state.reason = "the viewer's computer left the cluster"
+            else
+                state.reason = "the viewer's process is gone"
+            end
+            state.tell = false
         else
             check = time.after(host_session.CHECK_EVERY)
             local members = system.cluster.members()
-            if wire.present(members, viewer_node) == false then
+            local present = wire.present(members, viewer_node)
+            if present == true then state.life = now_ms() end
+            local verdict = wire.judge(present, math.tointeger(state.life) or 0, now_ms(), host_session.SILENCE_LIMIT)
+            if verdict == "gone" then
                 state.reason, state.tell = "the viewer's computer left the cluster", false
+            elseif verdict == "expired" then
+                state.reason = "nothing has confirmed the viewer for " .. tostring(host_session.SILENCE_LIMIT // 1000) .. " s"
             end
         end
     end

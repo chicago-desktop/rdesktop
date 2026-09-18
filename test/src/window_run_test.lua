@@ -85,7 +85,7 @@ local DESKTOP = "chicago.tui_desktop.desktop"
 
 local function stand_in(): any
     process.registry.register(DESKTOP)
-    return process.listen("desktop.open")
+    return process.listen("desktop.open", {message = true})
 end
 
 local function done(opens: any)
@@ -93,10 +93,21 @@ local function done(opens: any)
     process.registry.unregister(DESKTOP)
 end
 
-local function next_open(opens: any, seconds: integer): any
-    local picked = channel.select({opens:case_receive(), time.after(tostring(seconds) .. "s"):case_receive()})
-    if picked.channel ~= opens then return nil end
-    return picked.value
+-- next_open(opens, seconds, from) -> the spec a window asked to open
+--
+-- Only `from`'s: a window of an earlier case may still be finishing and
+-- asking this same stand-in desktop.
+local function next_open(opens: any, seconds: integer, from: string): any
+    local deadline = time.after(tostring(seconds) .. "s")
+    while true do
+        local picked = channel.select({opens:case_receive(), deadline:case_receive()})
+        if picked.channel ~= opens then return nil end
+        local message: any = picked.value
+        if tostring(message:from()) == from then
+            local body: any = message:payload():data()
+            return body
+        end
+    end
 end
 
 local function define_tests()
@@ -109,7 +120,7 @@ local function define_tests()
             test.not_nil(screen, "the connection screen:\n" .. text(seen))
             test.is_true(has("Connect")(seen), "a Connect button")
             assert(view:send(key("enter")))
-            local asked: any = next_open(opens, 10)
+            local asked: any = next_open(opens, 10, tostring(pid))
             done(opens)
             test.not_nil(asked, "the session window was asked for")
             test.eq(asked and asked.entry, "chicago.rdesktop:session")
@@ -136,7 +147,7 @@ local function define_tests()
             -- Ctrl+Alt+End shuts the remote desktop down: the connection
             -- window is asked for with the reason, and this one goes.
             assert(view:send(key("end", "end", {ctrl = true, alt = true})))
-            local asked: any = next_open(opens, 20)
+            local asked: any = next_open(opens, 20, tostring(pid))
             done(opens)
             test.not_nil(asked, "the connection window was asked for")
             test.eq(asked and asked.entry, "chicago.rdesktop:window")
@@ -150,7 +161,7 @@ local function define_tests()
         test.it("hands a refusal back to the connection window, whole", function()
             local opens = stand_in()
             local view, _, pid = open("chicago.rdesktop:session", json.encode({computer = "no-such-node"}))
-            local asked: any = next_open(opens, 15)
+            local asked: any = next_open(opens, 15, tostring(pid))
             done(opens)
             test.not_nil(asked)
             test.eq(json.decode(tostring(asked.args)).notice,

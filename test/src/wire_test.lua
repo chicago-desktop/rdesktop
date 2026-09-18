@@ -76,6 +76,13 @@ local function define_tests()
             test.is_nil(wire.node_of("not a pid"))
         end)
 
+        test.it("judge the other side in three states, with a ceiling on not knowing", function()
+            test.eq(wire.judge(false, 0, 1, 30000), "gone")
+            test.eq(wire.judge(true, 0, 999999, 30000), "here", "confirmed is here, however long ago the last message")
+            test.eq(wire.judge(nil, 1000, 20000, 30000), "unknown", "not knowing is not leaving")
+            test.eq(wire.judge(nil, 1000, 31001, 30000), "expired", "but not knowing has a ceiling")
+        end)
+
         test.it("say gone only when a membership list says so", function()
             local members = {{id = "a", is_local = true}, {id = "b"}}
             test.is_true(wire.present(members, "b"))

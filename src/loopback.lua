@@ -93,8 +93,11 @@ function loopback.open(spec: any): (any, string?)
         view:close()
         return nil, "viewport grant: " .. tostring(gerr)
     end
+    -- Linked: should the window die, the desktop goes with it; trapped,
+    -- so the desktop's failure is an end the window words (exits.lua).
+    exits.trap()
     local pid, perr = process.with_options({terminal = grant})
-        :spawn_monitored(spec.entry, spec.host, spec.args)
+        :spawn_linked_monitored(spec.entry, spec.host, spec.args)
     if not pid then
         view:close()
         return nil, "Could not connect: the host did not start " .. spec.entry .. " with the terminal: " .. tostring(perr)
