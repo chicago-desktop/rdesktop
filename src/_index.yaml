@@ -4,12 +4,14 @@ namespace: chicago.rdesktop
 # Remote Desktop for the Chicago shell: a window that shows another desktop
 # and drives it — its rows on this screen, this keyboard and mouse on it.
 #
-# The window reaches the other desktop only through a session interface
-# (open, channels, notice, snapshot, send, resize, close; loopback.lua says
-# what each one does). This version has one transport, the loopback — the
-# "remote" desktop is a Chicago shell in a local tty viewport on this node.
-# A network transport implements the same interface; the window switches
-# to it by its `transport:` import alone.
+# The window reaches the other desktop only through a session interface in
+# the shape of the tty Viewport (loopback.lua says what each call does). Two
+# transports implement it — the window picks one by its `transport:` import
+# alone:
+#   mesh      the desktop on another node of the cluster (or this one),
+#             served there by the node's broker; the window uses this one
+#   loopback  the desktop in a local tty viewport on this node, started with
+#             the window's own rights (it then needs the shell's policies)
 #
 # Keep the comments of this file free of an unquoted `: ` — a colon followed
 # by a space inside a meta.comment or a YAML comment value breaks the parse
@@ -20,14 +22,14 @@ entries:
     kind: ns.definition
     meta:
       title: Remote Desktop
-      description: A window that shows another Chicago desktop and drives it; the loopback transport runs that desktop on this node.
+      description: A window that shows another Chicago desktop and drives it — on a node of the cluster through its broker (mesh), or on this node in a local viewport (loopback).
 
   # ─── Dependencies ────────────────────────────────────────────────────
   - version: ">=0.2.0"
     name: dep.chicago.shell
     kind: ns.dependency
     meta:
-      comment: The Chicago shell — the desktop the loopback session starts, and its security policies.
+      comment: The Chicago shell — the desktop a session serves, and its security policies.
     component: github.com/chicago-desktop/shell
 
   - version: ">=0.2.0"
@@ -36,6 +38,16 @@ entries:
     meta:
       comment: The desktop base — the compositor that owns the window's frame, size and input, its input normalizer and its window host.
     component: github.com/chicago-desktop/tui-desktop
+
+  # chicago.rdesktop:process_host
+  - name: process_host
+    kind: ns.requirement
+    meta:
+      comment: The process host the Remote Desktop broker runs on; its sessions run on the same host.
+    default: app:processes
+    targets:
+      - entry: chicago.rdesktop:broker.service
+        path: .host
 
   # chicago.rdesktop:frames
   - name: frames
@@ -62,15 +74,131 @@ entries:
     meta:
       comment: The loopback transport of a remote-desktop session — the remote desktop in a local tty viewport on this node.
     source: file://loopback.lua
-    modules: [tty, process]
+    modules: [tty, process, channel]
     imports:
       frames: chicago.rdesktop:frames
+      exits: chicago.rdesktop:exits
+
+  # chicago.rdesktop:wire
+  - name: wire
+    kind: library.lua
+    meta:
+      comment: "The session protocol between a viewer and a serving node, as Lua tables — the Frame of runtime/service/rdesktop; the one sender, which refuses what would not survive the hop."
+    source: file://wire.lua
+    modules: [process]
+
+  # chicago.rdesktop:exits
+  - name: exits
+    kind: library.lua
+    meta:
+      comment: "Process ends told to whoever waits for them — one reader of the process's lifecycle channel for every session."
+    source: file://exits.lua
+    modules: [process, channel]
+
+  # chicago.rdesktop:mesh
+  #
+  # The mesh transport: the viewer's end of the session protocol.
+  - name: mesh
+    kind: library.lua
+    meta:
+      comment: "The mesh transport of a remote-desktop session — the desktop on a node of the cluster, served by that node's broker."
+    source: file://mesh.lua
+    modules: [process, channel, time, system]
+    imports:
+      wire: chicago.rdesktop:wire
+      exits: chicago.rdesktop:exits
+
+  # ─── Serving: "Remote Desktop is enabled on this computer" ───────────
+  # chicago.rdesktop:broker
+  - name: broker
+    kind: process.lua
+    meta:
+      comment: "The node's Remote Desktop broker — takes chicago.rdesktop.broker@<node id> (EVENTUAL) and spawns a session per open."
+    source: file://broker.lua
+    method: main
+    modules: [process, channel, system, logger]
+    imports:
+      wire: chicago.rdesktop:wire
+
+  # chicago.rdesktop:broker.service — its host is `process_host`'s.
+  - name: broker.service
+    kind: process.service
+    meta:
+      comment: Keeps the Remote Desktop broker of this node running under its own actor.
+    process: chicago.rdesktop:broker
+    lifecycle:
+      auto_start: true
+      restart:
+        initial_delay: 2s
+        max_attempts: 10
+        backoff_factor: 2.0
+      security:
+        actor:
+          id: chicago.rdesktop.broker
+        policies:
+          - chicago.rdesktop:serving
+          - chicago.shell.security:shell_runtime
+          - chicago.shell.security:shell_env
+
+  # chicago.rdesktop:host_session
+  #
+  # One served session, spawned by the broker under the broker's actor. The
+  # desktop it starts inherits that identity, hence the shell's policies on
+  # the service: the served desktop asks for a logon of its own.
+  - name: host_session
+    kind: process.lua
+    meta:
+      comment: "One served desktop session — a local viewport, the desktop in it, one frame in flight to the viewer; ends with the viewer, its node or the desktop."
+    source: file://host_session.lua
+    method: main
+    modules: [tty, process, channel, time, system, logger]
+    imports:
+      frames: chicago.rdesktop:frames
+      wire: chicago.rdesktop:wire
+      exits: chicago.rdesktop:exits
+
+  # chicago.rdesktop:serving
+  - name: serving
+    kind: security.policy
+    meta:
+      comment: "The broker and its sessions — the broker's name in the cluster registry, spawning sessions and desktops, watching viewers and the cluster."
+    policy:
+      actions:
+        - process.context
+        - process.registry
+        - process.registry.register
+        - process.registry.register.eventual
+        - process.registry.unregister
+        - process.spawn
+        - process.spawn.monitored
+        - process.monitor
+        - process.host
+        - process.terminate
+        - process.send
+        - system.read
+      resources: "*"
+      effect: allow
+
+  # chicago.rdesktop:viewing
+  - name: viewing
+    kind: security.policy
+    meta:
+      comment: "A Remote Desktop window on the mesh — find a node's broker, talk to its session, watch it and the cluster."
+    policy:
+      actions:
+        - process.context
+        - process.registry
+        - process.send
+        - process.monitor
+        - system.read
+      resources: "*"
+      effect: allow
 
   # chicago.rdesktop:session_spawn
   #
-  # What the window itself needs to run the loopback session: start the
-  # desktop on the base's window host with the viewport's grant, watch it,
-  # and cancel it when the window closes.
+  # What a window on the loopback transport needs to run its session: start
+  # the desktop on the base's window host with the viewport's grant, watch
+  # it, and cancel it when the window closes.
   - name: session_spawn
     kind: security.policy
     meta:
@@ -89,10 +217,10 @@ entries:
   # chicago.rdesktop:window
   #
   # A cells window (no pixel_render): the remote desktop arrives as styled
-  # terminal rows. The desktop it starts runs under this window's identity,
-  # so the window carries the shell's own two policies besides its own — the
-  # loopback desktop is a shell, and a shell without them does not come up.
-  # The desktop it starts is fixed in window.lua, never taken from args.
+  # terminal rows. On the mesh the desktop runs on the serving node under
+  # its broker's identity, so the window needs only `viewing`. Switched to
+  # the loopback transport, the desktop would run under the window's own
+  # identity: then the policies are session_spawn and the shell's two.
   - name: window
     kind: process.lua
     meta:
@@ -106,20 +234,18 @@ entries:
       height: 28
       window_type: app
       resizable: true
-      comment: "Remote Desktop — another Chicago desktop in a window (loopback transport, a shell on this node); keys mapped for the combinations the local desktop takes."
+      comment: "Remote Desktop — another Chicago desktop in a window, on a node of the cluster (args computer); keys mapped for the combinations the local desktop takes."
     source: file://window.lua
     method: main
     modules: [tty, json, channel]
     imports:
-      transport: chicago.rdesktop:loopback
+      transport: chicago.rdesktop:mesh
       frames: chicago.rdesktop:frames
       inputs: chicago.rdesktop:inputs
       input: chicago.tui_desktop.desktop:input
     security:
       policies:
-        - chicago.rdesktop:session_spawn
-        - chicago.shell.security:shell_runtime
-        - chicago.shell.security:shell_env
+        - chicago.rdesktop:viewing
 
   # chicago.rdesktop:tip
   - name: tip

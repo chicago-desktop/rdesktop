@@ -101,6 +101,48 @@ entries:
       resources: "*"
       effect: allow
 
+  - name: wire_test
+    kind: function.lua
+    meta:
+      type: test
+      comment: "The session protocol's tables — changed rows keyed by zero-based string index, the zero-based cursor, only shapes that survive the hop between nodes, broker names and nodes from PIDs."
+      group: Remote Desktop
+      suite: chicago_rdesktop
+    source: file://wire_test.lua
+    method: run
+    imports:
+      test: wippy.test:test
+      wire: chicago.rdesktop:wire
+      frames: chicago.rdesktop:frames
+
+  - name: mesh_test
+    kind: function.lua
+    meta:
+      type: test
+      comment: "The mesh transport on one node — a broker and its sessions, deltas, input, resize, one frame in flight, resync, the viewer or the server gone, and this node's broker service serving the Chicago desktop."
+      group: Remote Desktop
+      suite: chicago_rdesktop
+    source: file://mesh_test.lua
+    method: run
+    modules: [channel, time, process, fs]
+    imports:
+      test: wippy.test:test
+      mesh: chicago.rdesktop:mesh
+      exits: chicago.rdesktop:exits
+      inputs: chicago.rdesktop:inputs
+      frames: chicago.rdesktop:frames
+
+  # app:viewer_probe — a viewer that vanishes without closing (mesh_test).
+  - name: viewer_probe
+    kind: process.lua
+    meta:
+      comment: A mesh viewer for mesh_test that exits without closing its session.
+    source: file://viewer_probe.lua
+    method: main
+    modules: [process]
+    imports:
+      mesh: chicago.rdesktop:mesh
+
   # app:echo — a producer for loopback_test: draws its size and the last
   # input it got, and exits on close or cancel.
   - name: echo

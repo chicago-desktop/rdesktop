@@ -26,24 +26,30 @@ local frames = require("frames")
 local inputs = require("inputs")
 local input = require("input")
 
--- The desktop the loopback session starts: the Chicago shell, on the host
--- that runs the local desktop's windows. Fixed here, not taken from the
--- window's args: the window runs with the rights that desktop needs, and an
--- entry named by whoever opens the window would run with them too.
+-- The desktop a session asks for: the Chicago shell, on the host that runs a
+-- desktop's windows. Fixed here, not taken from the window's args: the
+-- loopback transport starts it with the window's own rights, and an entry
+-- named by whoever opens the window would run with them too. The mesh
+-- transport only checks it against what the remote computer offers.
 local TARGET = {entry = "chicago.shell:shell", host = "chicago.tui_desktop:workers"}
 
--- options(args) -> {keys}
+-- options(args) -> {keys, computer}
 --
 -- The window's args are a JSON object (`desktop.open` carries them as a
--- string): `{"keys": "local"}` switches the key mode. Anything unreadable is
--- the default.
+-- string): `{"computer": "<node id>"}` is the computer to connect to (none:
+-- this one), `{"keys": "local"}` switches the key mode. Anything unreadable
+-- is the default.
 local function options(args: any): any
     local decoded: any = nil
     if type(args) == "string" and args ~= "" then
         local value, err = json.decode(args)
         if err == nil and type(value) == "table" then decoded = value end
     end
-    return {keys = inputs.mode(decoded and decoded.keys)}
+    local computer: any = decoded and decoded.computer
+    return {
+        keys = inputs.mode(decoded and decoded.keys),
+        computer = type(computer) == "string" and computer ~= "" and computer or nil,
+    }
 end
 
 local function main(args: any)
@@ -73,15 +79,16 @@ local function main(args: any)
         }})
     end
 
-    run.notice = "Connecting to " .. TARGET.entry .. "..."
+    run.notice = "Connecting to " .. (run.options.computer or "this computer") .. "..."
     present()
     local session, why = transport.open({
-        entry = TARGET.entry, host = TARGET.host, width = run.width, height = run.height,
+        node = run.options.computer, entry = TARGET.entry, host = TARGET.host,
+        width = run.width, height = run.height,
     })
     if session then
         run.session = session
     else
-        run.notice = "Could not connect: " .. tostring(why) .. " (Esc closes)"
+        run.notice = tostring(why) .. " (Esc closes)"
     end
     present()
 

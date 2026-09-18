@@ -11,6 +11,7 @@
 --   transport.open(spec)            -> session | nil, reason
 --       spec = {entry, host, width, height, args?}: create the viewport and
 --       start the desktop `entry` on process host `host` with its grant.
+--       (`node` is ignored: the loopback desktop is always on this node.)
 --   session:grant()                 -> nil, reason
 --       the producer grant; one-shot, and open() has already given it to
 --       the desktop it started, so it is always consumed here.
@@ -45,6 +46,7 @@ local tty = require("tty")
 local process = require("process")
 local channel = require("channel")
 local frames = require("frames")
+local exits = require("exits")
 
 local loopback = {}
 
@@ -67,38 +69,6 @@ end
 local function acknowledged(state: any, after: integer): any
     if state.sent_revision ~= after or not state.sent_last then return nil end
     return state.sent_last
-end
-
--- The producers' ends. A process has ONE lifecycle channel
--- (process.events()), so one watcher reads it for every session of the
--- process and hands each EXIT to the session of that pid; a watcher per
--- session would take another session's EXIT and drop it. Keyed by pid.
-local watching: any = {ended = {}, started = false}
-
-local function watch()
-    local events = process.events()
-    while true do
-        local event: any, ok = events:receive()
-        if not ok then
-            for pid, ended in pairs(watching.ended) do
-                ended:send("the remote desktop can no longer be watched")
-                watching.ended[pid] = nil
-            end
-            watching.started = false
-            return
-        end
-        local ended: any = type(event) == "table" and event.kind == process.event.EXIT
-            and watching.ended[tostring(event.from)] or nil
-        if ended then
-            watching.ended[tostring(event.from)] = nil
-            local result: any = event.result
-            if type(result) == "table" and result.error ~= nil then
-                ended:send("the remote desktop failed: " .. tostring(result.error))
-            else
-                ended:send("the remote desktop ended")
-            end
-        end
-    end
 end
 
 -- open(spec) -> session | nil, reason
@@ -127,14 +97,19 @@ function loopback.open(spec: any): (any, string?)
         :spawn_monitored(spec.entry, spec.host, spec.args)
     if not pid then
         view:close()
-        return nil, "the host did not start " .. spec.entry .. " with the terminal: " .. tostring(perr)
+        return nil, "Could not connect: the host did not start " .. spec.entry .. " with the terminal: " .. tostring(perr)
     end
+    -- The desktop's end, worded, on a channel of the session's own.
     local ended = channel.new(1)
-    watching.ended[tostring(pid)] = ended
-    if not watching.started then
-        watching.started = true
-        coroutine.spawn(watch)
-    end
+    local exit = exits.watch(tostring(pid))
+    coroutine.spawn(function()
+        local result: any = exit:receive()
+        if type(result) == "table" and result.error ~= nil then
+            ended:send("the remote desktop failed: " .. tostring(result.error))
+        else
+            ended:send("the remote desktop ended")
+        end
+    end)
 
     -- Mutable state lives in a table: after an error under pcall go-lua
     -- stops sharing a local between a closure and its owner.

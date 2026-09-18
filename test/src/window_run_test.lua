@@ -1,6 +1,8 @@
 -- The Remote Desktop window run the way the compositor runs it after a
 -- logon: in a viewport of its own, spawned under a person's actor and a
--- narrow scope. What it shows is what the person would see.
+-- narrow scope. What it shows is what the person would see. The window is
+-- on the mesh: it reaches this node's broker service, which serves the
+-- desktop under its own identity.
 local test = require("test")
 local tty = require("tty")
 local channel = require("channel")
