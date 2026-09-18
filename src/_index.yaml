@@ -4,12 +4,14 @@ namespace: chicago.rdesktop
 # Remote Desktop for the Chicago shell: a window that shows another desktop
 # and drives it — its rows on this screen, this keyboard and mouse on it.
 #
-# The window reaches the other desktop only through a session interface in
-# the shape of the tty Viewport (loopback.lua says what each call does). Two
-# transports implement it — the window picks one by its `transport:` import
-# alone:
+# Two windows, as the Remote Desktop client has them: "Remote Desktop
+# Connection" (window, SDK) picks the computer; the session window
+# (session) shows its desktop. The session window reaches the other desktop
+# only through a session interface in the shape of the tty Viewport
+# (loopback.lua says what each call does). Two transports implement it — the
+# session window picks one by its `transport:` import alone:
 #   mesh      the desktop on another node of the cluster (or this one),
-#             served there by the node's broker; the window uses this one
+#             served there by the node's broker; the session window uses it
 #   loopback  the desktop in a local tty viewport on this node, started with
 #             the window's own rights (it then needs the shell's policies)
 #
@@ -223,11 +225,10 @@ entries:
 
   # chicago.rdesktop:window
   #
-  # A cells window (no pixel_render): the remote desktop arrives as styled
-  # terminal rows. On the mesh the desktop runs on the serving node under
-  # its broker's identity, so the window needs only `viewing`. Switched to
-  # the loopback transport, the desktop would run under the window's own
-  # identity: then the policies are session_spawn and the shell's two.
+  # "Remote Desktop Connection" — an ordinary SDK window, drawn by the
+  # shell's shared renderer in pixels and by the SDK in cells. Connect opens
+  # the session window and this one goes; the session window opens it again
+  # with the reason when a connection is refused or a session ends.
   - name: window
     kind: process.lua
     meta:
@@ -237,12 +238,49 @@ entries:
       icon: "▣"
       group: Programs/Accessories
       order: 100
+      width: 60
+      height: 17
+      window_type: app
+      resizable: true
+      pixel_render: chicago.shell.sdk:render
+      pixel_state: chicago.rdesktop:window
+      comment: "Remote Desktop Connection — the computers of the network, Connect and Cancel; args computer connects at once."
+    source: file://window.lua
+    method: main
+    modules: [json]
+    imports:
+      app: chicago.shell.sdk:app
+      connect: chicago.rdesktop:connect
+      facts: chicago.shell.config:system
+      desktop: chicago.tui_desktop.desktop:window_api
+    security:
+      policies:
+        - chicago.shell.security:view_state
+        - chicago.rdesktop:viewing
+
+  # chicago.rdesktop:session
+  #
+  # The session: another computer's desktop in a cells window. Its content is
+  # the remote desktop's styled terminal rows, which no SDK component carries;
+  # on a pixel desktop the compositor lays them as terminal characters inside
+  # the frame, as for Bash. On the mesh the desktop runs on the serving node
+  # under its broker's identity, so the window needs only `viewing`. Switched
+  # to the loopback transport, the desktop would run under the window's own
+  # identity: then the policies are session_spawn and the shell's two.
+  - name: session
+    kind: process.lua
+    meta:
+      type: tui_desktop.window
+      title: Remote Desktop
+      image: dialup
+      icon: "▣"
+      in_menu: false
       width: 84
       height: 28
       window_type: app
       resizable: true
-      comment: "Remote Desktop — pick a computer of the network, connect, drive its Chicago desktop; args computer connects at once; keys mapped for the combinations the local desktop takes."
-    source: file://window.lua
+      comment: "A Remote Desktop session — the remote computer's desktop, keys mapped for the combinations the local desktop takes; opened by the connection window."
+    source: file://session.lua
     method: main
     modules: [tty, json, channel]
     imports:
@@ -250,10 +288,7 @@ entries:
       frames: chicago.rdesktop:frames
       inputs: chicago.rdesktop:inputs
       input: chicago.tui_desktop.desktop:input
-      connect: chicago.rdesktop:connect
-      facts: chicago.shell.config:system
-      ui: chicago.shell.sdk:ui
-      cells: chicago.shell.sdk:cells
+      desktop: chicago.tui_desktop.desktop:window_api
     security:
       policies:
         - chicago.rdesktop:viewing

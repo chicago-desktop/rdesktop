@@ -63,7 +63,7 @@ entries:
     kind: function.lua
     meta:
       type: test
-      comment: "The window's registry entry — a cells window in Programs/Accessories whose transport is the one import, with the policies the loopback desktop needs; its args parsing."
+      comment: "The two windows' entries — the connection window on the SDK with the shell's renderer, the session window in cells outside the menu on the mesh; their args."
       group: Remote Desktop
       suite: chicago_rdesktop
     source: file://window_test.lua
@@ -72,17 +72,18 @@ entries:
     imports:
       test: wippy.test:test
       window: chicago.rdesktop:window
+      session: chicago.rdesktop:session
 
   - name: window_run_test
     kind: function.lua
     meta:
       type: test
-      comment: "The window run as the compositor runs it after a logon — its own viewport, a person's actor, a narrow scope; the connection screen, Enter to connect, back to the screen with the reason when the desktop ends or the computer refuses, args to connect at once."
+      comment: "The two windows run as the compositor runs them after a logon — own viewport, a person's actor, a narrow scope; the connection screen in cells opens the session window, the session drives the remote desktop and hands an end or a refusal back with the reason."
       group: Remote Desktop
       suite: chicago_rdesktop
     source: file://window_run_test.lua
     method: run
-    modules: [tty, channel, time, process, security, fs, system]
+    modules: [tty, channel, time, process, security, fs, system, json]
     imports:
       test: wippy.test:test
 
@@ -117,6 +118,24 @@ entries:
       facts: chicago.shell.config:system
       ui: chicago.shell.sdk:ui
       cells: chicago.shell.sdk:cells
+
+  - name: connect_window_test
+    kind: function.lua
+    meta:
+      type: test
+      comment: "Remote Desktop Connection through the SDK — Connect opens the session window and goes, Cancel and Esc close, the reason comes back, args connect at once, and test/shots/connect.png drawn by the shell's renderer."
+      group: Remote Desktop
+      suite: chicago_rdesktop
+    source: file://connect_window_test.lua
+    method: run
+    modules: [process, channel, time, json, fs, gfx, tty]
+    imports:
+      test: wippy.test:test
+      app: chicago.shell.sdk:app
+      ui: chicago.shell.sdk:ui
+      render: chicago.shell.sdk:render
+      rasters: chicago.shell.theme:rasters
+      window: chicago.rdesktop:window
 
   - name: wire_test
     kind: function.lua
@@ -170,10 +189,17 @@ entries:
     method: main
     modules: [tty, process, channel]
 
+  - name: system_fonts
+    kind: fs.directory
+    meta:
+      comment: System TrueType fonts, read-only — the font arrives in gfx as bytes, not as a path.
+    auto_init: false
+    directory: /usr/share/fonts/truetype/liberation/
+
   - name: shots
     kind: fs.directory
     meta:
-      comment: Where loopback_test writes the screens it saw, as text.
+      comment: Where the tests write what they saw — screens as text, the connection window as a PNG.
     base: project
     directory: ./shots
     auto_init: true

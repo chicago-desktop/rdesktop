@@ -79,7 +79,7 @@ end
 --
 -- `notice` is why the last connection failed or ended; it stands above the
 -- buttons until the person acts, the status line keeps the network's state.
-function connect.model(snapshot: any, notice: string?): any
+function connect.model(snapshot: any, notice: any?): any
     local rows, status = connect.computers(snapshot)
     local first: any = rows[1]
     return {rows = rows, status = status, notice = notice, selected = first and first.id or nil}
@@ -134,9 +134,10 @@ function connect.tree(model: any): any
         children[#children + 1] = {kind = "label", size = 2, wrap = true, alert = true, text = model.notice}
     end
     children[#children + 1] = {kind = "row", size = 2, align = "right", gap = 1, children = {
-        {kind = "button", id = "connect", size = 12, text = "Connect", default = true,
-            disabled = model.selected == nil},
-        {kind = "button", id = "cancel", size = 12, text = "Cancel"},
+        -- The classic dialog buttons: 75x23 px, 6 px apart (docs/sdk.md).
+        {kind = "button", id = "connect", size = 12, size_px = 81, width_px = 75, text = "Connect",
+            default = true, disabled = model.selected == nil},
+        {kind = "button", id = "cancel", size = 12, size_px = 81, width_px = 75, text = "Cancel"},
     }}
     children[#children + 1] = {kind = "statusbar", size = 1, fields = {{text = model.status}}}
     return {kind = "column", padding = 1, gap = 1, padding_bottom = 0, children = children}

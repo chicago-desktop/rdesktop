@@ -11,6 +11,7 @@ local process = require("process")
 local security = require("security")
 local fs = require("fs")
 local system = require("system")
+local json = require("json")
 
 -- wait_rows(view, accept, seconds) -> rows | nil, last rows
 local function wait_rows(view: any, updates: any, accept: any, seconds: integer): (any, any)
@@ -40,9 +41,9 @@ local function text(rows: any): string
     return table.concat(plain, "\n")
 end
 
--- open(args?) -> view, updates, pid — the window in a viewport of its own,
--- spawned under a person's actor and the narrow scope, as after a logon.
-local function open(args: string?): (any, any, any)
+-- open(entry, args?) -> view, updates, pid — a window in a viewport of its
+-- own, spawned under a person's actor and the narrow scope, as after a logon.
+local function open(entry: string, args: string?): (any, any, any)
     local view = assert(tty.viewport({width = 80, height = 24}))
     local updates = assert(view:updates())
     local narrow: any = assert(security.policy("app:narrow"))
@@ -50,7 +51,7 @@ local function open(args: string?): (any, any, any)
     local actor = security.new_actor("rdesktop-test-person", {})
     local pid = assert(process.with_options({terminal = assert(view:grant())})
         :with_actor(actor):with_scope(scope)
-        :spawn_monitored("chicago.rdesktop:window", "chicago.tui_desktop:workers", args))
+        :spawn_monitored(entry, "chicago.tui_desktop:workers", args))
     return view, updates, tostring(pid)
 end
 
@@ -65,7 +66,7 @@ local function shot(name: string, rows: any)
     if shots then shots:writefile(name, text(rows) .. "\n") end
 end
 
--- exits(pid, seconds) -> whether the process ended in time
+-- exits_within(pid, seconds) -> whether the process ended in time
 local function exits_within(pid: string, seconds: integer): boolean
     local events = process.events()
     local deadline = time.after(tostring(seconds) .. "s")
@@ -78,20 +79,50 @@ local function exits_within(pid: string, seconds: integer): boolean
     return false
 end
 
+-- A stand-in desktop under the base's default name, catching desktop.open:
+-- a window spawned here has no compositor in its context and asks that name.
+local DESKTOP = "chicago.tui_desktop.desktop"
+
+local function stand_in(): any
+    process.registry.register(DESKTOP)
+    return process.listen("desktop.open")
+end
+
+local function done(opens: any)
+    process.unlisten(opens)
+    process.registry.unregister(DESKTOP)
+end
+
+local function next_open(opens: any, seconds: integer): any
+    local picked = channel.select({opens:case_receive(), time.after(tostring(seconds) .. "s"):case_receive()})
+    if picked.channel ~= opens then return nil end
+    return picked.value
+end
+
 local function define_tests()
     test.describe("Remote Desktop under a logged-on person's narrow scope", function()
-        test.it("opens on the connection screen, connects, and comes back to it when the desktop ends", function()
-            local view, updates, pid = open(nil)
+        test.it("shows the connection screen in cells and opens the session window on Enter", function()
+            local opens = stand_in()
+            local view, updates, pid = open("chicago.rdesktop:window", nil)
             local screen, seen = wait_rows(view, updates, has("(this computer)"), 15)
             shot("window-connect.txt", seen)
             test.not_nil(screen, "the connection screen:\n" .. text(seen))
             test.is_true(has("Connect")(seen), "a Connect button")
-            test.is_false(has("Welcome")(seen), "no logon of ours: the remote computer asks for it")
-
-            -- Enter on the list connects to the selected computer: this one.
             assert(view:send(key("enter")))
-            local desk
-            desk, seen = wait_rows(view, updates, has("Start"), 25)
+            local asked: any = next_open(opens, 10)
+            done(opens)
+            test.not_nil(asked, "the session window was asked for")
+            test.eq(asked and asked.entry, "chicago.rdesktop:session")
+            test.eq(json.decode(tostring(asked.args)).computer, tostring(system.node.id()))
+            test.is_true(exits_within(pid, 10), "the connection window gives way")
+            view:close()
+        end)
+
+        test.it("drives the remote desktop and hands back to the connection window when it ends", function()
+            local own = tostring(system.node.id())
+            local opens = stand_in()
+            local view, updates, pid = open("chicago.rdesktop:session", json.encode({computer = own, name = "this one"}))
+            local desk, seen = wait_rows(view, updates, has("Start"), 25)
             shot("window-session.txt", seen)
             test.not_nil(desk, "the remote desktop inside the window:\n" .. text(seen))
 
@@ -102,41 +133,28 @@ local function define_tests()
             test.not_nil(menu, "the remote Start menu:\n" .. text(seen))
             assert(view:send(key("esc")))
 
-            -- Ctrl+Alt+End shuts the remote desktop down: the window is back
-            -- on its connection screen with the reason, not dead.
+            -- Ctrl+Alt+End shuts the remote desktop down: the connection
+            -- window is asked for with the reason, and this one goes.
             assert(view:send(key("end", "end", {ctrl = true, alt = true})))
-            local back
-            back, seen = wait_rows(view, updates, has("The remote desktop ended."), 20)
-            shot("window-ended.txt", seen)
-            test.not_nil(back, "back on the connection screen:\n" .. text(seen))
-            test.is_true(has("(this computer)")(seen), "with the list to connect again")
-
-            -- Esc there is Cancel: the window closes.
-            assert(view:send(key("esc")))
-            test.is_true(exits_within(pid, 10), "Cancel closes the window")
+            local asked: any = next_open(opens, 20)
+            done(opens)
+            test.not_nil(asked, "the connection window was asked for")
+            test.eq(asked and asked.entry, "chicago.rdesktop:window")
+            local back: any = json.decode(tostring(asked.args))
+            test.eq(back.notice, "The remote desktop ended.")
+            test.eq(back.selected, own, "the computer stays selected")
+            test.is_true(exits_within(pid, 10), "the session window goes")
             view:close()
         end)
 
-        test.it("connects at once to the computer in its args, skipping the screen", function()
-            local own = assert(system.node.id())
-            local view, updates, pid = open('{"computer":"' .. tostring(own) .. '"}')
-            local desk, seen = wait_rows(view, updates, has("Start"), 25)
-            test.not_nil(desk, "the remote desktop straight away:\n" .. text(seen))
-            test.is_false(has("Choose the computer")(seen))
-            assert(view:send({type = "close"}))
-            test.is_true(exits_within(pid, 15), "the window exits on close")
-            view:close()
-        end)
-
-        test.it("comes back to the screen with the reason when the computer refuses", function()
-            local view, updates, pid = open('{"computer":"no-such-node"}')
-            local screen, seen = wait_rows(view, updates, has("The computer is not accessible"), 15)
-            shot("window-refused.txt", seen)
-            test.not_nil(screen, "the refusal on the connection screen:\n" .. text(seen))
-            test.is_true(has("no-such-node.")(seen), "the reason names the computer:\n" .. text(seen))
-            test.is_false(has("Connecting to")(seen), "the attempt is over")
-            test.is_true(has("Connect")(seen), "the screen, not a dead window")
-            assert(view:send({type = "close"}))
+        test.it("hands a refusal back to the connection window, whole", function()
+            local opens = stand_in()
+            local view, _, pid = open("chicago.rdesktop:session", json.encode({computer = "no-such-node"}))
+            local asked: any = next_open(opens, 15)
+            done(opens)
+            test.not_nil(asked)
+            test.eq(json.decode(tostring(asked.args)).notice,
+                "The computer is not accessible. Remote Desktop is not enabled on no-such-node.")
             test.is_true(exits_within(pid, 10))
             view:close()
         end)
