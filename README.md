@@ -263,6 +263,17 @@ not offer …").
 
 ## Limits
 
+- **Proven on two nodes (2026-09-18):**
+  - both directions connect;
+  - kill -9 of the serving node → the window is back on the connection
+    screen with "The connection to <node> was lost." in ~4.7 s;
+  - kill -9 of the viewer's node, a closed window or a dropped SSH session →
+    the served desktop is gone (18 ms – 4.6 s).
+- **Proven by harness tests only, not live:**
+  - the terminate after the grace — on the stand the desktop always obeyed
+    the cancel; covered by `app:stubborn`;
+  - an abnormal death of the viewer's process — the stand could only end it
+    normally; covered by `app:viewer_probe`.
 - A served desktop and its windows take slots of the serving node's
   `chicago.tui_desktop:workers` host (`max_processes: 16`), shared with that
   node's own desktops. On the loopback, or on the mesh to this node, those

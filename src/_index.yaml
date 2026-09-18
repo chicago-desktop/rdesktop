@@ -243,7 +243,7 @@ entries:
       group: Programs/Accessories
       order: 100
       width: 60
-      height: 17
+      height: 19
       window_type: app
       resizable: true
       pixel_render: chicago.shell.sdk:render

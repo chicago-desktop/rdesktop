@@ -146,7 +146,12 @@ function connect.tree(model: any): any
         {kind = "button", id = "cancel", size = 12, size_px = 81, width_px = 75, text = "Cancel"},
     }}
     children[#children + 1] = {kind = "statusbar", size = 1, fields = {{text = model.status}}}
-    return {kind = "column", padding = 1, gap = 1, padding_bottom = 0, children = children}
+    -- No gaps in cells: every row goes to the list first. With a gap after
+    -- each part and the two-row reason, a 12-row client left the table its
+    -- header alone, and "this computer" — in the model — was not on the
+    -- screen (the two-node stand, after a refused connection). In pixels
+    -- the air comes back as 12 px, a row at the usual cell.
+    return {kind = "column", padding = 1, padding_bottom = 0, gap = 0, gap_px = 12, children = children}
 end
 
 local function row_id(model: any, action: any): any

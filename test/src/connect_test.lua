@@ -137,6 +137,26 @@ local function define_tests()
         end)
     end)
 
+    test.describe("what reaches the screen", function()
+        test.it("keeps this computer on the screen with a reason, down to a 9-row client", function()
+            local reasons = {"The connection to node-b was lost.",
+                "The remote session on node-with-a-rather-long-name.example failed: the connection was reset by the peer while reading."}
+            for _, reason in ipairs(reasons) do
+                for height = 9, 15 do
+                    local model = connect.model({node_id = "node-a", members = {{id = "node-a", is_local = true}},
+                        problems = {}}, reason)
+                    local interaction = ui.interaction()
+                    local plan = ui.plan(connect.tree(model), 58, height, interaction, {scroll_cols = 1})
+                    local screen = (string.gsub(table.concat(cells.rows(plan, interaction, 58, height), "\n"),
+                        "\27%[[0-9;:]*[A-Za-z]", ""))
+                    test.not_nil(string.find(screen, "node-a (this computer)", 1, true),
+                        "height " .. tostring(height) .. ", the rendered rows, not the model:\n" .. screen)
+                    test.not_nil(string.find(screen, "Connect", 1, true), "height " .. tostring(height))
+                end
+            end
+        end)
+    end)
+
     test.describe("the actions", function()
         test.it("connect on a double click, Enter and Connect; cancel on Cancel and Esc", function()
             local model = connect.model(facts.read(FACTS, stub(MESH)))
