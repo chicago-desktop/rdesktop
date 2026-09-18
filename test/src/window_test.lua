@@ -26,14 +26,16 @@ local function define_tests()
     end)
 
     test.describe("the session window", function()
-        test.it("is a cells window outside the menu, on the mesh transport", function()
+        test.it("is an SDK window outside the menu, drawn by the shell's renderer, on the mesh transport", function()
             local entry = assert(registry.get("chicago.rdesktop:session"))
             local meta: any = entry.meta
-            test.is_nil(meta.pixel_render, "a viewport snapshot has no rasters: the session draws in cells")
+            test.eq(tostring(meta.pixel_render) .. "|" .. tostring(meta.pixel_state),
+                "chicago.shell.sdk:render|chicago.rdesktop:session")
             test.is_false(meta.in_menu)
             local data: any = entry.data
             test.eq(data.imports.transport, "chicago.rdesktop:mesh")
-            test.eq(table.concat(data.security.policies, ","), "chicago.rdesktop:viewing",
+            test.eq(data.imports.app, "chicago.shell.sdk:app")
+            test.eq(table.concat(data.security.policies, ","), "chicago.shell.security:view_state,chicago.rdesktop:viewing",
                 "on the mesh the desktop runs under the serving broker, not the window")
         end)
 

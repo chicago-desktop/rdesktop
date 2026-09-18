@@ -88,8 +88,12 @@ local function stop(desktop: string, exit: any, log: any)
     end
 end
 
--- main(viewer, session, width, height, entry, host)
-function host_session.main(viewer: any, session: any, width: any, height: any, entry: any, host: any)
+-- main(viewer, session, width, height, entry, host, graphics?)
+--
+-- `graphics` is the viewer's grid from `open` (wire.lua, `g`). It is kept
+-- and not acted on: telling the desktop (view:terminal) before rasters
+-- travel over the wire makes it draw its chrome as pictures nobody gets.
+function host_session.main(viewer: any, session: any, width: any, height: any, entry: any, host: any, graphics: any)
     local log = logger:named("chicago.rdesktop.session")
     local number = math.tointeger(session) or 0
     viewer = tostring(viewer)

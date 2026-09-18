@@ -110,7 +110,7 @@ function broker.main(options: any)
                     wire.send(viewer, {k = "failed", s = number, m = "The remote computer cannot start sessions."})
                 else
                     local pid, serr = process.spawn_monitored(broker.SESSION, session_host, viewer, number,
-                        data.x, data.y, served.entry, served.host)
+                        data.x, data.y, served.entry, served.host, type(data.g) == "table" and data.g or nil)
                     if pid then
                         sessions[tostring(pid)] = {viewer = viewer, number = number}
                     else

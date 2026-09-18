@@ -5,7 +5,7 @@
 -- The same session interface as chicago.rdesktop:loopback — the window does
 -- not know which one it has:
 --
---   transport.open{node?, entry?, width, height} -> session | nil, reason
+--   transport.open{node?, entry?, width, height, graphics?} -> session | nil, reason
 --       `node` is a node id from system.cluster.members(); none is this node.
 --       `entry` is only checked against what the node offers.
 --   session:grant() / handle()      -> nil (the viewport is on the other node)
@@ -189,6 +189,9 @@ function mesh.open(spec: any): (any, string?)
 
     local asked: any = {k = "open", s = entry.number, x = width, y = height}
     if type(spec.entry) == "string" and spec.entry ~= "" then asked.n = spec.entry end
+    if type(spec.graphics) == "table" then
+        asked.g = {cell_w = math.tointeger(spec.graphics.cell_w) or 0, cell_h = math.tointeger(spec.graphics.cell_h) or 0}
+    end
     local sent, serr = wire.send(tostring(broker_pid), asked)
     if not sent then
         viewer.sessions[entry.number] = nil

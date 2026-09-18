@@ -17,6 +17,13 @@
 --   n  entry      the desktop entry asked for on open; absent is the
 --                 server's default
 --   m  reason     why a session closed or failed, in words for the status line
+--   g  graphics   on open: the viewer's grid, {cell_w, cell_h} in pixels
+--                 (cell_w is the mono column the remote screen is drawn in);
+--                 absent when the viewer draws in cells. Carried, not yet
+--                 acted on: the serving side tells its desktop about
+--                 graphics (view:terminal) only once rasters travel over
+--                 the wire, or the desktop draws its chrome as pictures that
+--                 never arrive.
 --
 -- Who sends what: the viewer sends open, ack, input, resize and close; the
 -- server sends opened, frame, closed and failed.

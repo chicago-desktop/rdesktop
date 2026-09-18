@@ -27,11 +27,11 @@ entries:
       description: A window that shows another Chicago desktop and drives it — on a node of the cluster through its broker (mesh), or on this node in a local viewport (loopback).
 
   # ─── Dependencies ────────────────────────────────────────────────────
-  - version: ">=0.2.0"
+  - version: ">=0.4.2"
     name: dep.chicago.shell
     kind: ns.dependency
     meta:
-      comment: The Chicago shell — the desktop a session serves, and its security policies.
+      comment: The Chicago shell — the desktop a session serves, its security policies, and the SDK's terminal view (0.4.2).
     component: github.com/chicago-desktop/shell
 
   - version: ">=0.2.0"
@@ -264,13 +264,14 @@ entries:
 
   # chicago.rdesktop:session
   #
-  # The session: another computer's desktop in a cells window. Its content is
-  # the remote desktop's styled terminal rows, which no SDK component carries;
-  # on a pixel desktop the compositor lays them as terminal characters inside
-  # the frame, as for Bash. On the mesh the desktop runs on the serving node
-  # under its broker's identity, so the window needs only `viewing`. Switched
-  # to the loopback transport, the desktop would run under the window's own
-  # identity: then the policies are session_spawn and the shell's two.
+  # The session: another computer's desktop, an ordinary SDK window whose tree
+  # is one `terminal` view — drawn by the shell's renderer in pixels (the
+  # remote screen measured in mono columns) and placed as it came in cells.
+  # On the mesh the desktop runs on the serving node under its broker's
+  # identity, so beyond the SDK's view_state the window needs only
+  # `viewing`. Switched to the loopback transport, the desktop would run
+  # under the window's own identity: then add session_spawn and the shell's
+  # two policies.
   - name: session
     kind: process.lua
     meta:
@@ -283,18 +284,22 @@ entries:
       height: 28
       window_type: app
       resizable: true
-      comment: "A Remote Desktop session — the remote computer's desktop, keys mapped for the combinations the local desktop takes; opened by the connection window."
+      pixel_render: chicago.shell.sdk:render
+      pixel_state: chicago.rdesktop:session
+      comment: "A Remote Desktop session — the remote computer's desktop in the SDK's terminal view, keys mapped for the combinations the local desktop takes; opened by the connection window."
     source: file://session.lua
     method: main
-    modules: [tty, json, channel]
+    modules: [json]
     imports:
+      app: chicago.shell.sdk:app
+      ui: chicago.shell.sdk:ui
       transport: chicago.rdesktop:mesh
       frames: chicago.rdesktop:frames
       inputs: chicago.rdesktop:inputs
-      input: chicago.tui_desktop.desktop:input
       desktop: chicago.tui_desktop.desktop:window_api
     security:
       policies:
+        - chicago.shell.security:view_state
         - chicago.rdesktop:viewing
 
   # chicago.rdesktop:tip

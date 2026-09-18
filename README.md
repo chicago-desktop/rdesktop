@@ -61,13 +61,10 @@ nothing says so.
 
 ## Inside
 
-- `chicago.rdesktop:window` — the window: a custom **cells** window with its
-  own loop (the SDK's custom-window contract, `docs/sdk.md`), because a
-  session's content is another desktop's styled terminal rows, which no
-  declarative component carries. It has two screens: the connection screen,
-  drawn and driven by the SDK's own pure halves (`ui.plan`, `cells.rows`,
-  `ui.event`), and the session, which presents the remote rows, forwards
-  keys, the mouse and pastes, and resizes the remote screen with itself.
+- `chicago.rdesktop:window` — "Remote Desktop Connection", an SDK window.
+- `chicago.rdesktop:session` — the session window, an SDK window whose tree
+  is the `terminal` view; it forwards keys (and the mouse and pastes once the
+  SDK passes them) and resizes the remote screen with itself.
 - `chicago.rdesktop:connect` — the connection screen as data: the computers,
   the tree, what each action does; pure.
 - `chicago.rdesktop:mesh` — the mesh transport, the viewer's end of the
@@ -120,15 +117,36 @@ a viewport does not say:
   transport must keep this; a queue of frames towards a viewer that stopped
   reading is memory, not lost frames.
 
-## Rows and a cursor only — no pixels
+## The session window: the remote screen in the SDK's terminal view
 
-A viewport snapshot carries rows, a cursor and a revision, nothing else:
-there are no images in `ttyapi.Snapshot`, and `system/tty/surface.Present`
-drops a frame's placements without a word. So the remote desktop is always
-shown as its **cells** rendering — a remote shell comes up with "pixels off"
-on the viewport's port by itself — whatever the local desktop draws its own
-chrome with. Pixels over this path are a separate stage that needs a change
-to `api/tty`, not to this module.
+The session window is an ordinary SDK window (`app.main`, `pixel_render`).
+Its tree is one `terminal` view (chicago/shell 0.4.2) holding the remote
+rows and cursor:
+
+- **In pixels** each row is decoded and drawn in the shell's mono face.
+- **In cells** the rows are placed as they came.
+
+**The remote screen is measured in mono columns when there are pixels, not
+in terminal cells.** It is `(client width × cell width) // ui.MONO_PX`: 58
+cells of 10 px hold 72 columns. The window opens the remote side at that
+size and resizes it to that size, so the remote desktop lays itself out on
+the grid it is drawn on. In cells a column is a cell.
+
+**Rows and a cursor only.** A viewport snapshot carries rows, a cursor and a
+revision. Rasters (`placements`) do not travel over the wire yet. So the
+remote desktop stays a cells desktop — its chrome drawn as characters,
+which the view draws in the mono face. The viewer's grid goes to the
+serving side in `open` (`g`, wire.lua), and nothing acts on it yet. Telling
+the remote desktop it has graphics (`view:terminal`) before rasters travel
+would make it draw its chrome as pictures nobody receives: a desktop
+without frames. The order is: rasters over the wire first, then the probe.
+
+**Pending in the SDK (chicago/shell 0.4.3):** the mouse and pastes. `app.run`
+hands `update` a key no component took, but not a mouse event or a paste.
+The view takes no input, so until then clicks, the wheel, drags and pastes
+do not reach the remote desktop, in pixels or in cells. `update` already
+forwards `{type = "mouse"}` (with the view's column and row when the SDK
+gives them) and `{type = "paste"}`.
 
 ## Keys the local desktop keeps
 

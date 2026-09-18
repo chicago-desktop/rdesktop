@@ -137,6 +137,24 @@ entries:
       rasters: chicago.shell.theme:rasters
       window: chicago.rdesktop:window
 
+  - name: session_window_test
+    kind: function.lua
+    meta:
+      type: test
+      comment: "The session window through the SDK against this node's broker — the remote screen in mono columns with pixels, keys forwarded, a resize in mono columns, and test/shots/session.png drawn by the shell's renderer."
+      group: Remote Desktop
+      suite: chicago_rdesktop
+    source: file://session_window_test.lua
+    method: run
+    modules: [channel, time, fs, gfx, tty]
+    imports:
+      test: wippy.test:test
+      app: chicago.shell.sdk:app
+      ui: chicago.shell.sdk:ui
+      render: chicago.shell.sdk:render
+      rasters: chicago.shell.theme:rasters
+      session: chicago.rdesktop:session
+
   - name: wire_test
     kind: function.lua
     meta:

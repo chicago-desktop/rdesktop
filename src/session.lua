@@ -1,17 +1,23 @@
 -- The Remote Desktop session window: another computer's desktop, driven.
 --
 -- Opened by "Remote Desktop Connection" (chicago.rdesktop:window) with args
--- `{"computer": "<node id>", "name": "<caption>", "keys": "local"?}`. A
--- custom cells window (the SDK's "custom window" contract, docs/sdk.md):
--- its content is the remote desktop's styled terminal rows, which no
--- declarative component carries — on a pixel desktop the compositor lays
--- them as terminal characters inside the frame, as it does for Bash.
+-- `{"computer": "<node id>", "name": "<caption>", "keys": "local"?}`. An
+-- ordinary window on the shell's SDK (app.main): its tree is one `terminal`
+-- view holding the remote screen's rows and cursor, drawn by the shell's
+-- renderer in pixels (each row decoded, in the mono face) and placed as it
+-- came in cells.
 --
--- The loop: a watermark on `updates` asks for the next delta, acknowledging
--- the revision the window has applied (one frame in flight); keys and the
--- mouse go to the remote desktop (keys through the key mode of
--- chicago.rdesktop:inputs); a resize of the window resizes the remote
--- screen. The logon is the remote computer's own "Welcome to Chicago".
+-- THE REMOTE SCREEN IS MEASURED IN MONO COLUMNS in pixels, not in terminal
+-- cells: (client width × cell width) // ui.MONO_PX — the grid the view draws
+-- it on. The remote side is opened and resized to that number, or it lays
+-- itself out on a grid nobody draws. In cells a column is a cell.
+--
+-- The loop is the SDK's: the session's `updates` and `ended` are watched
+-- channels. A watermark asks for the next delta, acknowledging the revision
+-- the window shows (one frame in flight). A key no component took — every
+-- key: the view takes none — goes to the remote desktop through the key
+-- mode of chicago.rdesktop:inputs; so do the mouse and pastes, when the SDK
+-- hands them over, with the column and row of that screen.
 --
 -- A refused connection or an ended session opens the connection window
 -- again with the reason and the computer still selected, and this window
@@ -19,27 +25,29 @@
 -- this window ends the session and nothing else.
 --
 -- The remote desktop is reached only through the session interface of the
--- library imported as `transport` (loopback.lua, mesh.lua).
-local tty = require("tty")
+-- library imported as `transport` (loopback.lua, mesh.lua). The logon is the
+-- remote computer's own "Welcome to Chicago".
+local app = require("app")
 local json = require("json")
-local channel = require("channel")
+local ui = require("ui")
 local transport = require("transport")
 local frames = require("frames")
 local inputs = require("inputs")
-local input = require("input")
 local desktop = require("desktop")
+
+local session = {}
 
 -- The desktop a session asks for: the Chicago shell, on the host that runs a
 -- desktop's windows. Fixed here, not taken from args: the loopback transport
 -- starts it with the window's own rights. The mesh transport only checks it
 -- against what the remote computer offers.
-local TARGET = {entry = "chicago.shell:shell", host = "chicago.tui_desktop:workers"}
+session.TARGET = {entry = "chicago.shell:shell", host = "chicago.tui_desktop:workers"}
 
 -- The connection window this one returns to.
-local CONNECTION = "chicago.rdesktop:window"
+session.CONNECTION = "chicago.rdesktop:window"
 
 -- options(args) -> {computer, name, keys}
-local function options(args: any): any
+function session.options(args: any): any
     local decoded: any = nil
     if type(args) == "string" and args ~= "" then
         local value, err = json.decode(args)
@@ -55,93 +63,154 @@ local function options(args: any): any
 end
 
 -- return_args(computer, reason) -> the connection window's args
-local function return_args(computer: any, reason: string): string
+function session.return_args(computer: any, reason: string): string
     local encoded = json.encode({notice = reason, selected = computer})
     return tostring(encoded)
 end
 
-local function main(args: any)
-    assert(tty.start())
-    local events = assert(tty.events())
-    local surface = assert(tty.surface({hide_cursor = true, synchronized_output = true}))
-
-    -- Mutable loop state lives in a table (go-lua and pcall, AGENTS.md).
-    local run: any = {width = 1, height = 1, options = options(args), session = nil, notice = nil, screen = nil}
-    run.width, run.height = tty.screen_size()
-    run.screen = frames.blank(run.width, run.height)
-    local name = run.options.name or run.options.computer or "this computer"
-
-    local function present()
-        local canvas = tty.canvas(run.width, run.height)
-        canvas:clear()
-        canvas:put_rows(1, 1, frames.compose(run.screen, run.width, run.height, run.notice), run.width)
-        local cursor: any = run.screen.cursor
-        local shown = run.notice == nil and type(cursor) == "table" and cursor.visible == true
-        surface:present(canvas:rows(), {cursor = {
-            x = shown and cursor.x or 1, y = shown and cursor.y or 1, visible = shown,
-        }})
+-- geometry(context) -> columns, rows — the remote screen for this client:
+-- mono columns when there are pixels, cells otherwise (docs/sdk.md,
+-- `terminal`).
+function session.geometry(context: any): (integer, integer)
+    local columns = math.tointeger(context.width) or 1
+    local cell: any = context.cell
+    if type(cell) == "table" and (math.tointeger(cell.w) or 0) > 0 then
+        columns = (columns * (math.tointeger(cell.w) or 0)) // ui.MONO_PX
     end
+    local rows = math.tointeger(context.height) or 1
+    if columns < 1 then columns = 1 end
+    if rows < 1 then rows = 1 end
+    return columns, rows
+end
 
-    -- back(reason) — the connection window again, with the reason.
-    local function back(reason: string)
-        desktop.open({entry = CONNECTION, args = return_args(run.options.computer, reason)})
-    end
+-- graphics(context) -> what the viewer's screen is, for `open`: the protocol
+-- and the grid it draws the remote screen on. Carried and not yet used: the
+-- serving side would tell its desktop (view:terminal) only once rasters
+-- travel over the wire — telling it earlier makes it draw its chrome as
+-- pictures that never arrive (README, "Rows and a cursor only").
+function session.graphics(context: any): any
+    local cell: any = context.cell
+    if type(cell) ~= "table" then return nil end
+    return {cell_w = ui.MONO_PX, cell_h = math.tointeger(cell.h) or 0}
+end
 
-    run.notice = "Connecting to " .. name .. "..."
-    present()
-    local session, why = transport.open({
-        node = run.options.computer, entry = TARGET.entry, host = TARGET.host,
-        width = run.width, height = run.height,
+-- tree(model, context) -> the window's tree: the remote screen, the notice
+-- (connecting, waiting) on its last row until the first frame.
+function session.tree(model: any, context: any): any
+    local columns, rows = session.geometry(context)
+    local cursor: any = model.screen.cursor
+    local shown = model.notice == nil and type(cursor) == "table" and cursor.visible == true
+    return {kind = "column", children = {
+        {kind = "terminal", rows = frames.compose(model.screen, columns, rows, model.notice),
+            cursor = shown and {x = cursor.x, y = cursor.y, visible = true} or nil},
+    }}
+end
+
+-- back(model, context, reason) — the connection window again, and go.
+local function back(model: any, context: any, reason: string)
+    model.session = nil
+    desktop.open({entry = session.CONNECTION, args = session.return_args(model.options.computer, reason)})
+    context.close()
+end
+
+-- dial(model, context) — open the session at the client's current size.
+local function dial(model: any, context: any)
+    local columns, rows = session.geometry(context)
+    local opened, why = transport.open({
+        node = model.options.computer, entry = session.TARGET.entry, host = session.TARGET.host,
+        width = columns, height = rows, graphics = session.graphics(context),
     })
-    if not session then
-        back(tostring(why))
-        pcall(tty.stop)
-        return
-    end
-    run.session = session
-    run.notice = "Connected to " .. name .. "; waiting for its screen..."
-    present()
+    if not opened then return back(model, context, tostring(why)) end
+    model.session = opened
+    model.screen = frames.blank(columns, rows)
+    model.notice = "Connected to " .. model.name .. "; waiting for its screen..."
+    context.watch(opened:updates())
+    context.watch(opened:ended())
+end
 
-    while true do
-        local picked = channel.select({events:case_receive(), session:updates():case_receive(),
-            session:ended():case_receive()})
-        if picked.channel == events then
-            if not picked.ok then break end
-            local event: any = input.normalize(picked.value)
-            if event.type == "close" then break end
-            if event.type == "resize" then
-                run.width, run.height = tty.screen_size()
-                session:resize(run.width, run.height)
-                surface:invalidate()
-                present()
-            elseif event.type == "key" then
-                session:send(inputs.key(event, run.options.keys))
-            elseif event.type == "mouse" then
-                session:send(inputs.mouse(event, run.width, run.height))
-            elseif event.type == "paste" then
-                session:send({type = "paste", text = event.text})
-            end
-        elseif picked.channel == session:updates() then
+local definition: any = {}
+
+-- The caption the connection window opened this one with, kept on every
+-- frame (an empty title would fall back to the menu entry's).
+function definition.title(model: any): string
+    return model.name .. " - Remote Desktop"
+end
+
+function definition.init(args: any, context: any): any
+    local options = session.options(args)
+    local columns, rows = session.geometry(context)
+    local model: any = {options = options, session = nil, screen = frames.blank(columns, rows),
+        name = options.name or options.computer or "this computer"}
+    model.notice = "Connecting to " .. model.name .. "..."
+    -- Connected on the first tick of the loop, not here: the window shows
+    -- "Connecting…" while the other computer is asked.
+    context.after("1ms", "dial")
+    return model
+end
+
+function definition.view(model: any, context: any): any
+    local tree = session.tree(model, context)
+    return tree
+end
+
+function definition.update(model: any, action: any, context: any): boolean
+    local live: any = model.session
+    if action.type == "timer" and action.tag == "dial" then
+        dial(model, context)
+        return true
+    elseif action.type == "channel" and live then
+        if action.channel == live:updates() then
             -- The revision the window shows is the acknowledgement: the next
             -- delta is cut from it, and nothing more is asked for until this
             -- one is applied.
-            local delta = session:snapshot(run.screen.revision)
-            if delta then
-                frames.apply(run.screen, delta)
-                run.notice = nil
-                present()
-            end
-        else
-            -- `ended`: the remote desktop is gone, its node or its server.
-            run.session = nil
-            session:close()
-            back(tostring(picked.value or "The remote session ended."))
-            break
+            local delta = live:snapshot(model.screen.revision)
+            if delta == nil then return false end
+            frames.apply(model.screen, delta)
+            model.notice = nil
+            return true
+        elseif action.channel == live:ended() then
+            live:close()
+            back(model, context, tostring(action.value or "The remote session ended."))
+            return false
         end
+        return false
+    elseif action.type == "resize" then
+        if live then
+            local columns, rows = session.geometry(context)
+            live:resize(columns, rows)
+        end
+        return true
+    elseif live == nil then
+        return false
+    elseif action.type == "key" then
+        live:send(inputs.key({type = "key", key = action.key, key_type = action.key_type, action = "press",
+            alt = action.alt, ctrl = action.ctrl, shift = action.shift}, model.options.keys))
+        return false
+    elseif action.type == "mouse" then
+        -- The SDK maps a press on the terminal view to that screen's column
+        -- and row; a cells-mode event without them is already in cells.
+        local columns, rows = session.geometry(context)
+        local event: any = {type = "mouse", action = action.action, button = action.button,
+            x = action.column or action.x, y = action.row or action.y,
+            alt = action.alt, ctrl = action.ctrl, shift = action.shift}
+        live:send(inputs.mouse(event, columns, rows))
+        return false
+    elseif action.type == "paste" then
+        live:send({type = "paste", text = action.text})
+        return false
+    elseif action.type == "close" then
+        live:close()
+        model.session = nil
+        return false
     end
-
-    if run.session then run.session:close() end
-    pcall(tty.stop)
+    return false
 end
 
-return {main = main, options = options, return_args = return_args, TARGET = TARGET, CONNECTION = CONNECTION}
+function definition.dispose(model: any, context: any)
+    if model.session then model.session:close() end
+end
+
+session.definition = definition
+session.main = app.main(definition)
+
+return session
