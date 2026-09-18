@@ -16,8 +16,9 @@
 -- channels. A watermark asks for the next delta, acknowledging the revision
 -- the window shows (one frame in flight). A key no component took — every
 -- key: the view takes none — goes to the remote desktop through the key
--- mode of chicago.rdesktop:inputs; so do the mouse and pastes, when the SDK
--- hands them over, with the column and row of that screen.
+-- mode of chicago.rdesktop:inputs; so do pastes, and a pointer standing on
+-- the view, which the SDK (chicago/shell 0.4.3, ui.terminal_at) hands over
+-- with the column and row of that screen already worked out.
 --
 -- A refused connection or an ended session opens the connection window
 -- again with the reason and the computer still selected, and this window
@@ -187,13 +188,14 @@ function definition.update(model: any, action: any, context: any): boolean
             alt = action.alt, ctrl = action.ctrl, shift = action.shift}, model.options.keys))
         return false
     elseif action.type == "mouse" then
-        -- The SDK maps a press on the terminal view to that screen's column
-        -- and row; a cells-mode event without them is already in cells.
+        -- The column and row of THAT screen, from the SDK — the one place the
+        -- grid is decided. A pointer without them is not over the view, and
+        -- is not guessed at here.
+        if action.column == nil or action.row == nil then return false end
         local columns, rows = session.geometry(context)
-        local event: any = {type = "mouse", action = action.action, button = action.button,
-            x = action.column or action.x, y = action.row or action.y,
-            alt = action.alt, ctrl = action.ctrl, shift = action.shift}
-        live:send(inputs.mouse(event, columns, rows))
+        live:send(inputs.mouse({type = "mouse", action = action.action, button = action.button,
+            x = action.column, y = action.row, alt = action.alt, ctrl = action.ctrl, shift = action.shift},
+            columns, rows))
         return false
     elseif action.type == "paste" then
         live:send({type = "paste", text = action.text})

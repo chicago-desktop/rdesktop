@@ -57,6 +57,20 @@ local function define_tests()
             test.eq(session.graphics(pixels).cell_w, ui.MONO_PX)
         end)
 
+        test.it("forwards pastes, and a pointer only with the view's own column and row", function()
+            local ctx = app.context({width = 30, height = 10, native = true, cell_w = 10, cell_h = 20})
+            local model = definition.init("", ctx)
+            local sent: any = {}
+            model.session = {send = function(_, event: any) sent[#sent + 1] = event; return true end}
+            app.dispatch(definition, model, ctx, {type = "paste", text = "hello"})
+            app.dispatch(definition, model, ctx, {type = "mouse", action = "press", button = "left", x = 3, y = 2})
+            app.dispatch(definition, model, ctx, {type = "mouse", action = "press", button = "left", x = 3, y = 2,
+                column = 4, row = 2})
+            test.eq(#sent, 2, "the pointer without the view's column is not guessed at")
+            test.eq(sent[1].type .. ":" .. tostring(sent[1].text), "paste:hello")
+            test.eq(sent[2].x .. "," .. sent[2].y, "4,2", "the column of that screen, not the cell")
+        end)
+
         test.it("opens the remote desktop at that size, drives it, and is drawn: test/shots/session.png", function()
             local ctx = app.context({width = CLIENT.w, height = CLIENT.h, native = true, cell_w = CELL.w, cell_h = CELL.h})
             local model = definition.init('{"name":"this one"}', ctx)
@@ -66,6 +80,23 @@ local function define_tests()
             test.is_true(pump(model, ctx, function(m: any) return screen_has(m, "Start") end, 25),
                 "the remote desktop:\n" .. table.concat(model.screen.rows, "\n"))
             test.eq(model.screen.width, 72, "the remote side laid itself out on the mono grid")
+
+            -- A click on the remote Start button, mapped by the SDK itself
+            -- (ui.terminal_at): the client cell (4, last row) is a column of
+            -- the mono grid, not a cell.
+            local plan = ui.plan(definition.view(model, ctx), ctx.width, ctx.height, ctx.interaction,
+                {cell = ctx.cell, scroll_cols = ctx.scroll_cols})
+            local item, column, row = ui.terminal_at(plan, 4, CLIENT.h)
+            test.not_nil(item, "the pointer stands on the view")
+            test.eq(tostring(column) .. "," .. tostring(row), "5," .. tostring(CLIENT.h), "the middle of cell 4 is mono column 5")
+            for _, phase in ipairs({"press", "release"}) do
+                app.dispatch(definition, model, ctx, {type = "mouse", action = phase, button = "left",
+                    x = 4, y = CLIENT.h, column = column, row = row})
+            end
+            test.is_true(pump(model, ctx, function(m: any) return screen_has(m, "Programs") end, 10),
+                "a click opened the remote Start menu:\n" .. table.concat(model.screen.rows, "\n"))
+            app.dispatch(definition, model, ctx, {type = "key", key = "esc", key_type = "esc"})
+            test.is_true(pump(model, ctx, function(m: any) return not screen_has(m, "Programs") end, 10), "Esc closed it")
 
             -- A key through update: Alt+Home is the remote Start menu.
             app.dispatch(definition, model, ctx, {type = "key", key = "home", key_type = "home", alt = true})

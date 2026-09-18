@@ -141,12 +141,13 @@ the remote desktop it has graphics (`view:terminal`) before rasters travel
 would make it draw its chrome as pictures nobody receives: a desktop
 without frames. The order is: rasters over the wire first, then the probe.
 
-**Pending in the SDK (chicago/shell 0.4.3):** the mouse and pastes. `app.run`
-hands `update` a key no component took, but not a mouse event or a paste.
-The view takes no input, so until then clicks, the wheel, drags and pastes
-do not reach the remote desktop, in pixels or in cells. `update` already
-forwards `{type = "mouse"}` (with the view's column and row when the SDK
-gives them) and `{type = "paste"}`.
+**The mouse and pastes** (chicago/shell 0.4.3). A pointer standing on the
+view reaches the window with the column and row of the remote screen. The
+SDK works them out (`ui.terminal_at`: the middle of the cell, on the mono
+grid), and the window sends them on unchanged. It never computes a column
+from a cell itself. A pointer off the view is swallowed by the SDK, as for
+every window. The view fills the client, so that is only a drag released
+outside the window. Pastes go to the remote desktop as they are.
 
 ## Keys the local desktop keeps
 
