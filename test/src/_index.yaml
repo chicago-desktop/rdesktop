@@ -141,7 +141,7 @@ entries:
     kind: function.lua
     meta:
       type: test
-      comment: "The session window through the SDK against this node's broker — the remote screen in mono columns with pixels, keys forwarded, a resize in mono columns, and test/shots/session.png drawn by the shell's renderer."
+      comment: "The session window through the SDK against this node's broker — the remote screen in mono columns with pixels, keys forwarded, a resize in mono columns, and test/shots/session.png drawn by the shell's renderer in another process, after the tree crossed a process boundary."
       group: Remote Desktop
       suite: chicago_rdesktop
     source: file://session_window_test.lua
@@ -151,8 +151,6 @@ entries:
       test: wippy.test:test
       app: chicago.shell.sdk:app
       ui: chicago.shell.sdk:ui
-      render: chicago.shell.sdk:render
-      rasters: chicago.shell.theme:rasters
       session: chicago.rdesktop:session
       mesh: chicago.rdesktop:mesh
       frames: chicago.rdesktop:frames
@@ -180,7 +178,7 @@ entries:
       suite: chicago_rdesktop
     source: file://mesh_test.lua
     method: run
-    modules: [channel, time, process, fs, security]
+    modules: [channel, time, process, fs, security, gfx]
     imports:
       test: wippy.test:test
       mesh: chicago.rdesktop:mesh
@@ -225,6 +223,20 @@ entries:
     source: file://cellprobe.lua
     method: main
     modules: [tty, gfx, process]
+
+  # app:render_probe — renders a window's tree in another process, the way
+  # the compositor receives it (session_window_test).
+  - name: render_probe
+    kind: process.lua
+    meta:
+      comment: Receives a window tree in a message, checks it for userdata, renders it and writes the PNG.
+    source: file://render_probe.lua
+    method: main
+    modules: [process, fs, gfx, tty]
+    imports:
+      ui: chicago.shell.sdk:ui
+      render: chicago.shell.sdk:render
+      rasters: chicago.shell.theme:rasters
 
   # app:stubborn — a producer that does not act on CANCEL (mesh_test).
   - name: stubborn

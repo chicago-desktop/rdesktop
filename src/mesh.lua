@@ -34,7 +34,6 @@ local time = require("time")
 local system = require("system")
 local wire = require("wire")
 local exits = require("exits")
-local gfx = require("gfx")
 local base64 = require("base64")
 
 local mesh = {}
@@ -122,28 +121,37 @@ local function run()
     end
 end
 
--- images(entry, list) -> the pictures of a frame, rasters attached
+-- images(entry, list) -> the pictures of a frame, as the terminal view takes
+-- them: {id, key, png, serial, version, x, y, cols, rows, z}
 --
--- A picture's pixels arrive once per (serial, version) and are kept for the
--- session; later frames name it by that pair. A picture whose pixels this
--- side does not have (they did not decode) is left out, not drawn empty.
+-- A picture's PNG arrives once per (serial, version) and is kept, as bytes,
+-- for the session; later frames name it by that pair. It is handed on as
+-- bytes, never decoded here: the window's tree is PUBLISHED to the
+-- compositor, and a raster does not survive being sent to another process
+-- (it arrives nil — the owner saw white rectangles where the remote windows
+-- were). The compositor's renderer decodes it once, by `key`.
+--
+-- `key` is "<node>:<session>:<id>": unique to this source. A serial is
+-- counted per process, so two nodes can both have "bars" with serial 3, and
+-- keyed by id:serial:version the renderer would show the other one's.
 local function images(entry: any, list: any): any
     local out: any = {}
     for _, item in ipairs(type(list) == "table" and list or {}) do
         local picture: any = item
-        local key = wire.picture_key(picture.s, picture.v)
+        local identity = wire.picture_key(picture.s, picture.v)
         if type(picture.b) == "string" then
             entry.picture_bytes = entry.picture_bytes + #picture.b
-            if entry.rasters[key] == nil then
+            if entry.pngs[identity] == nil then
                 local bytes = base64.decode(picture.b)
-                local raster = bytes and gfx.image(bytes) or nil
-                if raster then entry.rasters[key] = raster end
+                if bytes then entry.pngs[identity] = bytes end
             end
         end
-        local raster: any = entry.rasters[key]
-        if raster then
-            out[#out + 1] = {id = tostring(picture.i), x = picture.x, y = picture.y, cols = picture.c,
-                rows = picture.r, z = picture.z, serial = picture.s, version = picture.v, raster = raster}
+        local png: any = entry.pngs[identity]
+        if png then
+            out[#out + 1] = {id = tostring(picture.i),
+                key = tostring(entry.node) .. ":" .. tostring(entry.number) .. ":" .. tostring(picture.i),
+                png = png, serial = picture.s, version = picture.v,
+                x = picture.x, y = picture.y, cols = picture.c, rows = picture.r, z = picture.z}
         end
     end
     return out
@@ -208,7 +216,7 @@ function mesh.open(spec: any): (any, string?)
 
     viewer.next = viewer.next + 1
     local entry: any = {number = viewer.next, node = node, server = nil, pending = nil, received = 0, life = now_ms(),
-        rasters = {}, picture_bytes = 0,
+        pngs = {}, picture_bytes = 0,
         handed = nil, over = false, opening = channel.new(1),
         updates = channel.new(1), ended = channel.new(1)}
     viewer.sessions[entry.number] = entry

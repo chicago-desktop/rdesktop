@@ -9,8 +9,6 @@ local fs = require("fs")
 local gfx = require("gfx")
 local app = require("app")
 local ui = require("ui")
-local render = require("render")
-local rasters = require("rasters")
 local session = require("session")
 local mesh = require("mesh")
 local frames = require("frames")
@@ -20,9 +18,20 @@ local definition = session.definition
 local CLIENT = {w = 58, h = 20}
 local CELL = {w = 10, h = 20}
 
-local function font(file: string): any
-    local files = assert(fs.get("app:system_fonts"))
-    return assert(gfx.font(assert(files:readfile(file)), {size = 13, smooth = true}))
+-- render_elsewhere(name, tree, ctx) -> report — the tree sent to ANOTHER
+-- process, as desktop.publish_state sends it to the compositor, and drawn
+-- there (app:render_probe) into test/shots/<name>.png. A tree drawn where it
+-- was built proves nothing about what the compositor gets.
+local function render_elsewhere(name: string, tree: any, ctx: any): any
+    local done = process.listen("render.done")
+    local probe = assert(process.spawn("app:render_probe", "app:processes", tostring(process.pid())))
+    process.send(tostring(probe), "render.tree", {name = name, tree = tree, interaction = ctx.interaction,
+        cols = ctx.width, rows = ctx.height, cell_w = CELL.w, cell_h = CELL.h})
+    local picked = channel.select({done:case_receive(), time.after("15s"):case_receive()})
+    process.unlisten(done)
+    if picked.channel ~= done then return {drawn = false, why = "the render probe did not answer"} end
+    local report: any = picked.value
+    return report
 end
 
 -- A served desktop in pixels draws its chrome as pictures: the taskbar is
@@ -91,12 +100,11 @@ local function define_tests()
             test.eq(#(model.screen.images or {}), 1, "the painter's picture arrived")
             local tree = session.tree(model, ctx)
             test.eq(#tree.children[1].images, 1, "and is handed to the terminal view")
-            local store = rasters.store()
-            store.begin()
-            local placed = assert(render.placement({id = "pictures", state_revision = 1, content_state = {sdk = 1, revision = 1,
-                ui = tree, interaction = ctx.interaction}}, {x = 1, y = 1, cols = ctx.width, rows = ctx.height},
-                CELL, {face = font("LiberationSans-Regular.ttf"), mono = font("LiberationMono-Regular.ttf")}, store))
-            assert(assert(fs.get("app:shots")):writefile("pictures.png", assert(placed.raster:encode("png"))))
+            local report = render_elsewhere("pictures", tree, ctx)
+            test.is_nil(report.userdata, "nothing that cannot cross to the compositor")
+            test.is_nil(report.problem)
+            test.eq(report.pictures, 1, "the picture's bytes reached the other process")
+            test.is_true(report.drawn, tostring(report.why))
             live:close()
         end)
 
@@ -128,7 +136,7 @@ local function define_tests()
             test.eq(model.screen.width, 72, "the remote side laid itself out on the mono grid")
             local taskbar: any = picture(model, "bars")
             test.eq(tostring(taskbar.cols) .. "x" .. tostring(taskbar.rows), "72x2", "the taskbar spans the screen")
-            test.not_nil(taskbar.raster, "its pixels arrived")
+            test.eq(type(taskbar.png), "string", "its pixels arrived, as PNG bytes")
             test.is_true(model.session:picture_bytes() > 0)
 
             -- A click on the remote Start button, mapped by the SDK itself
@@ -153,14 +161,15 @@ local function define_tests()
             test.is_true(pump(model, ctx, function(m: any) return picture(m, "menu:") ~= nil end, 10),
                 "the remote Start menu; pictures: " .. pictures_named(model))
 
+            -- The window's tree, as the compositor gets it: sent to another
+            -- process and drawn there.
             local tree = definition.view(model, ctx)
             test.is_nil(ui.problem(tree))
-            local store = rasters.store()
-            store.begin()
-            local placed = assert(render.placement({id = "session", state_revision = 1, content_state = {sdk = 1, revision = 1,
-                ui = tree, interaction = ctx.interaction}}, {x = 1, y = 1, cols = ctx.width, rows = ctx.height},
-                CELL, {face = font("LiberationSans-Regular.ttf"), mono = font("LiberationMono-Regular.ttf")}, store))
-            assert(assert(fs.get("app:shots")):writefile("session.png", assert(placed.raster:encode("png"))))
+            local report = render_elsewhere("session", tree, ctx)
+            test.is_nil(report.userdata, "nothing that cannot cross to the compositor")
+            test.is_nil(report.problem)
+            test.is_true((math.tointeger(report.pictures) or 0) >= 2, "the taskbar and the menu reached the other process as bytes")
+            test.is_true(report.drawn, tostring(report.why))
 
             -- A resize goes to the remote side in mono columns too.
             ctx.width = 48

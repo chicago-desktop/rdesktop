@@ -149,12 +149,29 @@ the grid it is drawn on. In cells a column is a cell.
 - A viewer in cells sends no `g`: its desktop stays in cells and no picture
   is sent.
 
+**Pictures reach the window as PNG bytes, never as rasters** (chicago/shell
+0.5.0). The session window's tree is PUBLISHED to the compositor, and a
+`gfx` raster does not survive being sent to another process: it arrives nil.
+v0.3.0 put rasters in the tree. Its tests drew the tree in the process that
+built it and were green, while a live terminal showed white rectangles
+where the remote windows were. Now each picture goes into the terminal view
+as `{id, key, png, serial, version, x, y, cols, rows, z}`. `key` is
+`<node>:<session>:<id>`, because a serial is counted per process and two
+nodes can repeat one. The compositor's renderer decodes each picture once.
+The evidence is a render in ANOTHER process (`app:render_probe`, fed the
+tree through `process.send` as `publish_state` sends it), never one in the
+window's own.
+
 **End to end** (runtime 91dcbee8, which answers a viewport producer's
 graphics probe from the viewport). The served Chicago desktop comes up in
 pixels, and its chrome arrives as pictures: the taskbar (`bars`), the desktop
 icons, the Start menu (`menu:<n>`). A cold desktop is ~5.6 KB of pixels, and
-opening the Start menu adds ~11 KB once. `test/shots/session.png` is that
-remote desktop, drawn by the shell's renderer in the session window.
+opening the Start menu adds ~11 KB once — over the wire. Between the
+session window and its compositor (one process to another on the same node)
+every publish carries all the PNGs on screen, ~10-15 KB with a menu or a
+window open. That is measured, not yet optimised. `test/shots/session.png`
+is that remote desktop, drawn in another process after the tree crossed the
+boundary.
 `view:terminal` takes integer sizes.
 
 **The mouse and pastes** (chicago/shell 0.4.3). A pointer standing on the
