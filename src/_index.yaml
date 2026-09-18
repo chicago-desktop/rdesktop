@@ -1,0 +1,121 @@
+version: "1.0"
+namespace: chicago.rdesktop
+
+# A module of the Chicago shell (chicago/shell): one sample window on the
+# shell's SDK, split in two — `view` is the window as data (a pure library
+# the tests exercise) and `window` is the process that runs it — plus the
+# module's own image pack for the window's picture.
+#
+# Keep the comments of this file free of an unquoted `: ` — a colon followed
+# by a space inside a meta.comment or a YAML comment value breaks the parse
+# of the whole index, and the boot with it. Quote such comments.
+
+entries:
+  - name: definition
+    kind: ns.definition
+    meta:
+      title: Remote Desktop
+      description: A sample module for the Chicago desktop, made from the Chicago module template — one window on the shell SDK.
+
+  # ─── Dependencies ────────────────────────────────────────────────────
+  # The shell and the base are resolved from their GitHub repositories by
+  # tag — `component` names the repository, the module keeps its own name
+  # (chicago/shell, chicago/tui-desktop) in the lock. A compatibility range,
+  # never an exact version: the lock holds the exact one, and the range says
+  # what the module was written against (v0.2.0 is the first tag of both).
+  - version: ">=0.2.0"
+    name: dep.chicago.shell
+    kind: ns.dependency
+    meta:
+      comment: The Chicago shell — its SDK lays out and draws the window, its image packs bring the pictures.
+    component: github.com/chicago-desktop/shell
+
+  - version: ">=0.2.0"
+    name: dep.chicago.tui_desktop
+    kind: ns.dependency
+    meta:
+      comment: The desktop base — the compositor that owns the window's frame, size and input.
+    component: github.com/chicago-desktop/tui-desktop
+
+  # chicago.rdesktop:images
+  #
+  # An image pack of the shell (`meta.type: chicago.images`; the shell's
+  # docs/icons.md, "Image packs"): PNG files lie as `<size>/<name>.png` and
+  # the window names one `chicago.rdesktop:images/hello`. The pack
+  # lives outside src/, so wippy.yaml lists it under `embed:` — without that
+  # the published module has no pictures.
+  - name: images
+    kind: fs.directory
+    meta:
+      type: chicago.images
+      comment: "The module's pictures — the sample window's balloon at 32 and 16 px, an image pack of the shell."
+    base: module
+    directory: ./assets/images
+    auto_init: false
+
+  # chicago.rdesktop:view
+  - name: view
+    kind: library.lua
+    meta:
+      comment: "The sample window as data — the component tree of a model (the menu, a line of text, a button that counts its clicks, the status bar, About) and what an action does to it; pure over the model."
+    source: file://view.lua
+    imports:
+      ui: chicago.shell.sdk:ui
+
+  # chicago.rdesktop:window
+  #
+  # The Start menu finds a `process.lua` with `meta.type: tui_desktop.window`.
+  # `group` is the menu folder (a module's windows go under Programs/<Module>),
+  # `image` the picture in the menu and the title bar, `icon` its character
+  # for a terminal without graphics, `width`/`height` the outer size in
+  # cells. `pixel_render` + `pixel_state` make the window draw through the
+  # shell's shared renderer in graphics mode; in cells the same process draws.
+  - name: window
+    kind: process.lua
+    meta:
+      type: tui_desktop.window
+      title: Hello Window
+      image: chicago.rdesktop:images/hello
+      icon: "☺"
+      group: Programs/Remote Desktop
+      order: 100
+      width: 42
+      height: 14
+      window_type: app
+      resizable: true
+      pixel_render: chicago.shell.sdk:render
+      pixel_state: chicago.rdesktop:window
+      comment: "Hello Window — a sample window on the shell SDK with a menu, a line of text, a button that counts its clicks and a status bar."
+    source: file://window.lua
+    method: main
+    imports:
+      app: chicago.shell.sdk:app
+      view: chicago.rdesktop:view
+    # The shell's policy for a view window's state provider: the process
+    # context, the compositor's name in the process registry, sending it
+    # the state. Add a policy of your own only for what your window reads.
+    security:
+      policies: [chicago.shell.security:view_state]
+
+  # chicago.rdesktop:tip
+  #
+  # A "Did you know..." tip for the Welcome window (chicago/welcome), which
+  # reads every `registry.entry` with `meta.type: chicago.tip`, ordered by
+  # `meta.order` and then by id (its own tips use 10 to 130). In `data`,
+  # `text` is the tip, one short paragraph (a tip without it is skipped);
+  # `image` is optional, a square pack picture `<pack entry>/<file>` drawn at
+  # 32 px or an illustration `<pack entry>/pictures/<file>` shown 100 px high;
+  # `open` is the window the Show Me button opens and `args` what it is
+  # opened with (a string, or a table sent as JSON). No dependency on
+  # chicago/welcome is needed; where it is not installed the entry is inert.
+  # Rewrite the text for your program, or delete the entry and its test.
+  - name: tip
+    kind: registry.entry
+    meta:
+      type: chicago.tip
+      order: 500
+      comment: "Welcome tip — opening Hello Window from the Start menu; Show Me opens it."
+    data:
+      text: "Hello Window counts your clicks. To open it, click Start, point to Programs, then Remote Desktop, and click Hello Window."
+      image: chicago.rdesktop:images/hello
+      open: chicago.rdesktop:window

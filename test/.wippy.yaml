@@ -1,0 +1,20 @@
+version: "1.0"
+# The harness boots the module under test from `..`; the shell and its base
+# are resolved from their GitHub repositories by tag through the module's
+# own dependencies (`make setup` writes them into wippy.lock). To test
+# against a working copy of the shell instead, add a replacement for it
+# here — and remove it again before publishing, or the module builds only
+# on a machine that has that directory beside it:
+#   chicago/shell: ../../shell
+workspace:
+  replacements:
+    chicago/rdesktop: ..
+override:
+  # The base runs programs through `exec`, which does not inherit the OS
+  # environment; the harness hands it the two variables a shell needs.
+  "chicago.tui_desktop:exec:default_env.HOME": "${env:HOME}"
+  "chicago.tui_desktop:exec:default_env.PATH": "${env:PATH}"
+  # The shell and its base ask the application for the group given access to
+  # their endpoints; the harness's permissive scope stands in.
+  "chicago.shell.security:user_security_scope:data.default": app:user
+  "chicago.tui_desktop.security:user_security_scope:data.default": app:user

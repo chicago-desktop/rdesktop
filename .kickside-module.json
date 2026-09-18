@@ -1,0 +1,12 @@
+{
+  "templateVersion": 1,
+  "initialized": true,
+  "identity": {
+    "organization": "chicago",
+    "module": "rdesktop",
+    "namespace": "chicago.rdesktop",
+    "tag": "chicago-rdesktop",
+    "title": "Remote Desktop",
+    "githubOwner": "chicago-desktop"
+  }
+}

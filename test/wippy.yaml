@@ -1,0 +1,4 @@
+organization: chicago
+module: rdesktop-harness
+description: Standalone runnable harness that boots chicago/rdesktop with the shell and runs its co-located *_test.lua suites.
+version: "1.0"
