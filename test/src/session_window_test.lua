@@ -64,10 +64,18 @@ local function pump(model: any, ctx: any, accept: any, seconds: integer): boolea
     return true
 end
 
+-- pixel_context(fields) — a native window's context whose screen speaks
+-- sixel (the protocol the stand's viewers have and no default guesses),
+-- through the SDK's own field (chicago/shell 0.5.2).
+local function pixel_context(fields: any): any
+    fields.protocol = "sixel"
+    return app.context(fields)
+end
+
 local function define_tests()
     test.describe("the session window", function()
         test.it("measures the remote screen in mono columns with pixels, in cells without", function()
-            local pixels = app.context({width = 58, height = 20, native = true, cell_w = 10, cell_h = 20})
+            local pixels = pixel_context({width = 58, height = 20, native = true, cell_w = 10, cell_h = 20})
             local columns, rows = session.geometry(pixels)
             test.eq(columns .. "x" .. rows, "72x20", "58 cells of 10 px hold 72 glyphs of " .. tostring(ui.MONO_PX))
             local cells = app.context({width = 58, height = 20})
@@ -75,6 +83,9 @@ local function define_tests()
             test.eq(columns .. "x" .. rows, "58x20")
             test.is_nil(session.graphics(cells))
             test.eq(session.graphics(pixels).cell_w, ui.MONO_PX)
+            test.eq(session.graphics(pixels).protocol, "sixel", "the compositor's protocol, not a constant")
+            local unsaid = app.context({width = 58, height = 20, native = true, cell_w = 10, cell_h = 20})
+            test.is_nil(session.graphics(unsaid), "pixels without a protocol are not guessed at")
         end)
 
         test.it("draws the pictures that crossed the wire: test/shots/pictures.png", function()
@@ -86,7 +97,7 @@ local function define_tests()
                 local picked = channel.select({deadline:case_receive(), time.after("50ms"):case_receive()})
                 if picked.channel == deadline then error("the broker did not take " .. name) end
             end
-            local ctx = app.context({width = 20, height = 5, native = true, cell_w = 10, cell_h = 20})
+            local ctx = pixel_context({width = 20, height = 5, native = true, cell_w = 10, cell_h = 20})
             local columns, rows = session.geometry(ctx)
             local live = assert(mesh.open({broker = name, width = columns, height = rows, graphics = session.graphics(ctx)}))
             local model: any = {screen = frames.blank(columns, rows), notice = nil}
@@ -109,7 +120,7 @@ local function define_tests()
         end)
 
         test.it("forwards pastes, and a pointer only with the view's own column and row", function()
-            local ctx = app.context({width = 30, height = 10, native = true, cell_w = 10, cell_h = 20})
+            local ctx = pixel_context({width = 30, height = 10, native = true, cell_w = 10, cell_h = 20})
             local model = definition.init("", ctx)
             local sent: any = {}
             model.session = {send = function(_, event: any) sent[#sent + 1] = event; return true end}
@@ -123,7 +134,7 @@ local function define_tests()
         end)
 
         test.it("opens the remote desktop in pixels at that size, drives it, and is drawn: test/shots/session.png", function()
-            local ctx = app.context({width = CLIENT.w, height = CLIENT.h, native = true, cell_w = CELL.w, cell_h = CELL.h})
+            local ctx = pixel_context({width = CLIENT.w, height = CLIENT.h, native = true, cell_w = CELL.w, cell_h = CELL.h})
             local model = definition.init('{"name":"this one"}', ctx)
             test.eq(tostring(definition.title(model)), "this one - Remote Desktop")
             app.dispatch(definition, model, ctx, {type = "timer", tag = "dial"})

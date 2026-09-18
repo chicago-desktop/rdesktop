@@ -17,11 +17,14 @@
 --   n  entry      the desktop entry asked for on open; absent is the
 --                 server's default
 --   m  reason     why a session closed or failed, in words for the status line
---   g  graphics   on open: the viewer's grid, {cell_w, cell_h} in pixels
---                 (cell_w is the mono column the remote screen is drawn in);
---                 absent when the viewer draws in cells. With it the serving
---                 side tells its desktop it has graphics on that grid
---                 (view:terminal) and sends pictures; without it, neither.
+--   g  graphics   on open: the viewer's grid and its terminal's graphics,
+--                 {cell_w, cell_h, protocol} (cell_w is the mono column the
+--                 remote screen is drawn in; protocol is "kitty" or "sixel",
+--                 what the viewer's own terminal speaks); absent when the
+--                 viewer draws in cells or does not know its protocol. With
+--                 it the serving side tells its desktop it has THAT protocol
+--                 on that grid (view:terminal) and sends pictures; without
+--                 it, neither.
 --   p  pictures   on a frame, when the viewer has graphics: EVERY picture
 --                 standing on the screen, a list of {i = id, x, y, c = cols,
 --                 r = rows, z, s = serial, v = version, b = bytes?}; x and y

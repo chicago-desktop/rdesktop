@@ -84,15 +84,19 @@ function session.geometry(context: any): (integer, integer)
     return columns, rows
 end
 
--- graphics(context) -> the grid this window draws the remote screen on, for
--- `open`: a mono column wide, a row high. The serving side tells its desktop
--- it has graphics on exactly this grid, so the desktop lays its chrome out
--- for our pixels and no picture has to be scaled; nil in cells, and then
--- the desktop stays in cells and sends no pictures.
+-- graphics(context) -> the grid this window draws the remote screen on and
+-- the protocol of the terminal it is drawn to, for `open`: a mono column
+-- wide, a row high, `context.protocol` (the compositor's own, "kitty" or
+-- "sixel"). The serving side tells its desktop it has that protocol on
+-- exactly this grid, so the desktop lays its chrome out for our pixels and
+-- no picture has to be scaled. nil in cells, and nil when the context does
+-- not say the protocol — then the desktop stays in cells and sends no
+-- pictures, rather than one guessed here.
 function session.graphics(context: any): any
     local cell: any = context.cell
-    if type(cell) ~= "table" then return nil end
-    return {cell_w = ui.MONO_PX, cell_h = math.tointeger(cell.h) or 0}
+    local protocol: any = context.protocol
+    if type(cell) ~= "table" or type(protocol) ~= "string" or protocol == "" then return nil end
+    return {cell_w = ui.MONO_PX, cell_h = math.tointeger(cell.h) or 0, protocol = protocol}
 end
 
 -- tree(model, context) -> the window's tree: the remote screen, the notice

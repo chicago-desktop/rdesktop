@@ -227,8 +227,12 @@ function mesh.open(spec: any): (any, string?)
 
     local asked: any = {k = "open", s = entry.number, x = width, y = height}
     if type(spec.entry) == "string" and spec.entry ~= "" then asked.n = spec.entry end
-    if type(spec.graphics) == "table" then
-        asked.g = {cell_w = math.tointeger(spec.graphics.cell_w) or 0, cell_h = math.tointeger(spec.graphics.cell_h) or 0}
+    -- Graphics without a protocol are not sent: the serving side would have
+    -- to guess one, and a guess diverges from the viewer silently.
+    local graphics: any = spec.graphics
+    if type(graphics) == "table" and type(graphics.protocol) == "string" and graphics.protocol ~= "" then
+        asked.g = {cell_w = math.tointeger(graphics.cell_w) or 0, cell_h = math.tointeger(graphics.cell_h) or 0,
+            protocol = graphics.protocol}
     end
     local sent, serr = wire.send(tostring(broker_pid), asked)
     if not sent then

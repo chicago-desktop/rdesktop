@@ -133,10 +133,19 @@ size and resizes it to that size, so the remote desktop lays itself out on
 the grid it is drawn on. In cells a column is a cell.
 
 **Pictures** (runtime d20096ed, chicago/shell 0.4.6).
-- The viewer sends its grid in `open` (`g`: a mono column wide, a row high).
+- The viewer sends its grid and its protocol in `open` (`g`: a mono column
+  wide, a row high, and the `protocol` of the compositor's terminal, from
+  `context.protocol`).
 - The serving session tells its desktop, BEFORE the desktop starts, that it
-  has graphics on exactly that grid (`view:terminal`). The desktop then lays
-  its pixel chrome out for our pixels, and nothing is scaled.
+  has THAT protocol on exactly that grid (`view:terminal`). The desktop then
+  lays its pixel chrome out for our pixels, and nothing is scaled. A
+  refusal is logged with its reason, and the desktop stays in cells.
+- **The protocol is the viewer's, never a constant.** Up to v0.3.1 the
+  serving side said "kitty" for every viewer. That held on one node, where
+  both ends were kitty. On two nodes the viewer was sixel, and the next such
+  divergence would be silent. A window that does not know its protocol
+  sends no `g` at all: its desktop stays in cells, which is the right
+  outcome, not a refusal.
 - Every frame carries the pictures standing on the remote screen (`p`), and
   the terminal view draws them over the rows.
 - A picture's pixels (PNG, base64) travel once per `(serial, version)` per
@@ -146,8 +155,8 @@ the grid it is drawn on. In cells a column is a cell.
   keystroke would fill the unbounded queue between the nodes.
 - A new `open` starts with an empty cache on both sides, so a reopened window
   is sent everything again.
-- A viewer in cells sends no `g`: its desktop stays in cells and no picture
-  is sent.
+- A viewer in cells, or one without a protocol, sends no `g`: its desktop
+  stays in cells and no picture is sent.
 
 **Pictures reach the window as PNG bytes, never as rasters** (chicago/shell
 0.5.0). The session window's tree is PUBLISHED to the compositor, and a

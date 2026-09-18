@@ -307,10 +307,13 @@ local function define_tests()
 
         test.it("sends a picture's pixels once per identity, and its geometry with every frame", function()
             start_broker_offering("test.broker.pictures", "app:painter")
-            local graphics = {cell_w = 8, cell_h = 20}
+            -- Sixel: the served desktop must hear the viewer's protocol,
+            -- not one the serving side picked.
+            local graphics = {cell_w = 8, cell_h = 20, protocol = "sixel"}
             local session = assert(mesh.open({broker = "test.broker.pictures", width = 20, height = 5, graphics = graphics}))
             local screen = frames.blank(20, 5)
             test.not_nil(wait(session, screen, row_is(1, "painter start"), 10))
+            test.eq(screen.rows[2], "gfx sixel 8x20", "the desktop was told the viewer's protocol and grid")
             test.eq(#screen.images, 1, "the picture on the screen")
             local picture: any = screen.images[1]
             test.eq(table.concat({picture.id, picture.x, picture.y, picture.cols, picture.rows}, ","), "pic,2,2,2,2")
@@ -364,6 +367,15 @@ local function define_tests()
             test.is_nil(screen.images, "no pictures without graphics")
             test.eq(session:picture_bytes(), 0)
             session:close()
+
+            -- A grid without a protocol is not graphics: nothing is guessed.
+            local unsaid = assert(mesh.open({broker = "test.broker.cells", width = 20, height = 5,
+                graphics = {cell_w = 8, cell_h = 20}}))
+            local plain = frames.blank(20, 5)
+            test.not_nil(wait(unsaid, plain, row_is(1, "painter start"), 10))
+            test.is_nil(plain.images, "no pictures without the viewer's protocol")
+            test.eq(string.sub(tostring(plain.rows[2]), 1, 8), "gfx nil ", "the desktop heard no protocol")
+            unsaid:close()
         end)
 
         test.it("reaches this node's own broker service and its Chicago desktop", function()

@@ -27,11 +27,11 @@ entries:
       description: A window that shows another Chicago desktop and drives it — on a node of the cluster through its broker (mesh), or on this node in a local viewport (loopback).
 
   # ─── Dependencies ────────────────────────────────────────────────────
-  - version: ">=0.5.0"
+  - version: ">=0.5.2"
     name: dep.chicago.shell
     kind: ns.dependency
     meta:
-      comment: The Chicago shell — the desktop a session serves, its security policies, and the SDK's terminal view with its pointer, paste, frame glyphs and pictures as PNG bytes (0.5.0).
+      comment: The Chicago shell — the desktop a session serves, its security policies, and the SDK's terminal view with its pointer, paste, frame glyphs, pictures as PNG bytes (0.5.0) and the screen's graphics protocol in context.protocol (0.5.2).
     component: github.com/chicago-desktop/shell
 
   - version: ">=0.2.0"

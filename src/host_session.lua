@@ -37,11 +37,6 @@ local host_session = {}
 -- How often the viewer's node is looked for in the cluster's membership.
 host_session.CHECK_EVERY = "2s"
 
--- The graphics protocol a served desktop is told it has. Its pictures come
--- back through the viewport, not through a terminal, so any protocol the
--- desktop draws for will do.
-host_session.PROTOCOL = "kitty"
-
 -- How long a session keeps a viewer nothing confirms — no message from it,
 -- no membership that shows its node — before it ends (milliseconds).
 host_session.SILENCE_LIMIT = 30000
@@ -126,11 +121,15 @@ end
 
 -- main(viewer, session, width, height, entry, host, graphics?)
 --
--- `graphics` is the viewer's grid from `open` (wire.lua, `g`). With it the
--- desktop is told, BEFORE it starts, that it has graphics on exactly that
--- grid (view:terminal) — the grid the viewer draws the remote screen on, not
--- any terminal's cell — and the frames carry its pictures. Without it the
--- desktop stays in cells and no picture is sent.
+-- `graphics` is the viewer's grid and protocol from `open` (wire.lua, `g`).
+-- With it the desktop is told, BEFORE it starts, that it has the VIEWER'S
+-- protocol on exactly that grid (view:terminal) — the grid the viewer draws
+-- the remote screen on, not any terminal's cell — and the frames carry its
+-- pictures. The protocol is the viewer's, never one chosen here: the desktop
+-- decides by it how to draw, and a constant that happens to match one
+-- viewer diverges from the next one without a word. Without `graphics`, or
+-- with a protocol the runtime refuses, the desktop stays in cells and no
+-- picture is sent.
 function host_session.main(viewer: any, session: any, width: any, height: any, entry: any, host: any, graphics: any)
     local log = logger:named("chicago.rdesktop.session")
     local number = math.tointeger(session) or 0
@@ -151,14 +150,19 @@ function host_session.main(viewer: any, session: any, width: any, height: any, e
     if not view then return fail("the remote computer could not make a screen: " .. tostring(verr)) end
     local updates = assert(view:updates())
     local drawn: any = type(graphics) == "table" and (math.tointeger(graphics.cell_w) or 0) > 0
-        and (math.tointeger(graphics.cell_h) or 0) > 0 and graphics or nil
+        and (math.tointeger(graphics.cell_h) or 0) > 0 and type(graphics.protocol) == "string"
+        and graphics or nil
     if drawn then
-        local told, why = view:terminal(host_session.PROTOCOL, math.tointeger(drawn.cell_w) or 0,
+        local told, why = view:terminal(tostring(drawn.protocol), math.tointeger(drawn.cell_w) or 0,
             math.tointeger(drawn.cell_h) or 0)
         if not told then
-            log:warn("desktop not told it has graphics; it stays in cells", {error = tostring(why)})
+            log:warn("desktop not told it has graphics; it stays in cells",
+                {protocol = tostring(drawn.protocol), error = tostring(why)})
             drawn = nil
         end
+    elseif graphics ~= nil then
+        log:warn("desktop not told it has graphics; it stays in cells",
+            {error = "the viewer's graphics name no grid or no protocol"})
     end
     local grant = assert(view:grant())
     local desktop, derr = process.with_options({terminal = grant})

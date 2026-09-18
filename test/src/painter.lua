@@ -1,7 +1,8 @@
 -- A tty producer that puts a picture on its screen, for the picture wire:
 -- row 1 says what it last did; "x" changes only the text, "m" moves the same
--- picture, "n" replaces it with a new one (a new serial). Reports its pid
--- like app:echo.
+-- picture, "n" replaces it with a new one (a new serial). Row 2 says what
+-- its gfx hears of the terminal: "gfx <protocol> <w>x<h>", the viewer's
+-- protocol and grid when the serving side told the viewport so.
 local tty = require("tty")
 local gfx = require("gfx")
 local process = require("process")
@@ -16,11 +17,15 @@ local function main()
     state.raster = gfx.raster(16, 40)
     state.raster:fill("#ff0000")
     state.width, state.height = tty.screen_size()
+    local protocol = gfx.supported()
+    local cell_w, cell_h = gfx.cell_size()
+    state.heard = "gfx " .. tostring(protocol) .. " " .. tostring(cell_w) .. "x" .. tostring(cell_h)
 
     local function draw()
         local rows = {}
         for y = 1, state.height do rows[y] = "" end
         rows[1] = "painter " .. state.last
+        if state.height > 1 then rows[2] = state.heard end
         surface:present(rows, {images = {{id = "pic", x = state.x, y = 2, cols = 2, rows = 2, raster = state.raster}}})
     end
 
